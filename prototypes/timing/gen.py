@@ -213,6 +213,9 @@ stopped = P.obj("sel 0", 900, Y + 330, ins=2, outs=2)
 panic = P.msg("panic", 900, Y + 360); clear = P.msg("clear", 980, Y + 360)
 P.c(poll, tr_s); P.c(tr_s, chg, 6); P.c(chg, stopped); P.c(stopped, panic); P.c(stopped, clear)
 P.c(panic, out_send); P.c(clear, pipe)
+# switching mode abandons the other mechanism's pending note-offs -> release everything on every switch
+switch_b = P.obj("t b", 1000, Y + 330)
+P.c(mode_t, switch_b, 1); P.c(switch_b, panic); P.c(switch_b, clear)
 P.save_amxd(os.path.join(here, "PF4 Proto Hub.amxd"), 420)
 
 # ---- voice ----------------------------------------------------------------------------------
