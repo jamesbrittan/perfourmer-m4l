@@ -1,7 +1,8 @@
 """Builds the Max for Live devices ("PF4 Hub.amxd", "PF4 Voice.amxd") next to this file.
 
 Run: python3 max/build_devices.py   (after `npm run build` in engine/, which writes pf4-engine.js here)
-The devices are generated, not hand-patched: edit this file and rebuild.
+The devices are generated, not hand-patched: edit this file and rebuild. Scripts (pf4-hub.js with the engine
+inlined, pf4-voice.js) are embedded in v8.codebox objects, so the .amxd files need nothing beside them.
 """
 import json, os, struct
 
@@ -9,6 +10,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GRID_TICKS = 2  # player resolution; must match GRID_TICKS in pf4-hub.js
 BANK_SIZE = 10000  # must match BANK_SIZE in pf4-hub.js
 VOICE_BUS = "pf4.voice"
+
+
+def embedded(script, inline_engine=False):
+    """Source of a device script; the engine bundle is inlined in place of require("pf4-engine.js")."""
+    with open(os.path.join(HERE, script)) as f:
+        code = f.read()
+    if inline_engine:
+        with open(os.path.join(HERE, "pf4-engine.js")) as f:
+            bundle = f.read()
+        module = ("(function () {\n  const module = { exports: {} };\n  const exports = module.exports;\n"
+                  + bundle + "\n  return module.exports;\n})()")
+        assert 'require("pf4-engine.js")' in code
+        code = code.replace('require("pf4-engine.js")', module)
+    return code
 
 
 class Patch:
@@ -33,6 +48,11 @@ class Patch:
 
     def msg(self, text, x, y):
         return self.add("message", x, y, text=text, ins=2, outs=1)
+
+    def codebox(self, code, x, y, ins=1, outs=1):
+        """A v8 object whose JavaScript is stored inside the device, so copies and presets stay self-contained."""
+        return self.add("v8.codebox", x, y, w=200, h=60, ins=ins, outs=outs, code=code, filename="none",
+                        saved_object_attributes={"parameter_enable": 0})
 
     def comment(self, text, x, y, w=None):
         return self.add("comment", x, y, w=w, text=text, ins=1, outs=0)
@@ -78,7 +98,7 @@ def build_hub():
     Y = 220  # logic lives below the visible 169px device area
 
     # --- adapter + shared player table
-    adapter = P.obj("v8 pf4-hub.js", 4, Y, ins=1, outs=3)
+    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 800, ins=1, outs=3)
     table = P.obj("coll", 4, Y + 40, ins=1, outs=4)
     pending = P.obj("route 0 1 2 3", 200, Y + 40, ins=2, outs=5)
     bus = P.obj(f"send {VOICE_BUS}", 4, Y + 700)
@@ -187,7 +207,7 @@ def build_voice():
     rel_sel = V.obj("sel 1", 250, 290, ins=2, outs=2)
     V.c(rcv, route); V.c(route, rel_mine, 0); V.c(rel_mine, rel_sel); V.c(rel_sel, held)
     V.c(route, held, 1)
-    brain = V.obj("js pf4-voice.js", 400, 290)
+    brain = V.codebox(embedded("pf4-voice.js"), 400, 600)
     rc = V.msg("rollcall", 400, 260)
     V.c(route, rc, 2); V.c(rc, brain)
     # notes: [voice pitch velocity] -> pass [pitch velocity] if the voice is ours
