@@ -54,8 +54,8 @@ Press **reset stats** after starting playback, since the first bar includes star
 | audible difference by ear (V3 quintuplets) | | |
 
 Hardware checks:
-- [ ] External Instruments in separate rack chains keep their own MIDI channels (single-track design)
-- [ ] All four voices play independent lines (M1 with 4 channels)
+- [x] External Instruments in separate rack chains keep their own MIDI channels (single-track design)
+- [x] All four voices play independent lines (M1 with 4 channels)
 - [ ] V4 ties glide/legato
 - [ ] AT LFO on each voice sweeps that voice's filter only (voice 1 has a 2 s cycle, voice 4 an 8 s cycle)
 - [ ] Chord skew at tick 0. Record the Perfourmer's audio output and measure the gap between the four onsets, or spy the port with MIDI Monitor (snoize).
@@ -63,4 +63,6 @@ Hardware checks:
 
 ## Findings
 
-_(filled in after testing; summarised on issue #2)_
+- **2026-09-24: single-track routing confirmed.** One track with the Hub followed by an Instrument Rack of four Voice Chains (Voice device → External Instrument, ch 1–4) plays four independent lines on the Perfourmer, in time. The Voice devices detected their chain numbers correctly.
+
+_(timing measurements still to come; summarised on issue #2)_
