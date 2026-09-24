@@ -1,13 +1,12 @@
 {
   "name": "perfourmer-m4l",
   "private": true,
-  "type": "module",
   "scripts": {
     "lint": "eslint .",
     "prepare": "husky"
   },
   "lint-staged": {
-    "*.{js,jsx,cjs,mjs,ts,tsx}": "eslint"
+    "*.{js,jsx,cjs,mjs,ts,tsx}": "eslint --no-warn-ignored"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
