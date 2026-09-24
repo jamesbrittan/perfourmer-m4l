@@ -103,16 +103,14 @@ def build_hub():
     Y = 220  # logic lives below the visible 169px device area
 
     # --- adapter + shared player table
-    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=5)
+    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=6)
     table = P.obj("coll", 4, Y + 40, ins=1, outs=4)
     shared_notes = P.obj("zl iter 3", 4, Y + 80, ins=2, outs=2)
     pending = P.obj("route 0 1 2 3", 200, Y + 40, ins=2, outs=5)
     bus = P.obj(f"send {VOICE_BUS}", 4, Y + 700)
     hub_in = P.obj(f"receive {HUB_BUS}", 200, Y - 30, ins=0)
     P.c(adapter, table, 0, 0); P.c(adapter, pending, 1); P.c(hub_in, adapter)
-    # notes only pass while the transport runs, so a tick that races the stop can't start a note
-    note_gate = P.obj("gate 1 1", 4, Y + 110, ins=2)
-    P.c(table, shared_notes); P.c(shared_notes, note_gate, 0, 1); P.c(note_gate, bus)
+    P.c(table, shared_notes); P.c(shared_notes, bus)
 
     # --- visible: one 2×2 block per Lane, then status/setup
     P.comment("PF4 Hub", 4, 0, 60)
@@ -126,36 +124,34 @@ def build_hub():
     P.comment("Perfourmer setup: Play Mode M1 · synth ch 1–4 on MIDI ch 1–4 · "
               "Edit 3 (aftertouch → cutoff) on", 380, 76, 190)
 
-    # --- Live's time signature -> adapter (bar length for Reset)
+    # --- Live API (via the adapter): transport running/stopped and time signature
     here = P.obj("live.thisdevice", 1000, Y, ins=1, outs=3)
-    live_set = P.msg("path live_set", 1000, Y + 30)
-    path = P.obj("live.path", 1000, Y + 60, ins=1, outs=3)
-    num = P.obj("live.observer @property signature_numerator", 1150, Y + 90, ins=2, outs=2)
-    den = P.obj("live.observer @property signature_denominator", 1150, Y + 120, ins=2, outs=2)
-    sig = P.obj("pak 4 4", 1150, Y + 150, ins=2)
-    sig_msg = P.obj("prepend timesig", 1150, Y + 180)
-    P.c(here, live_set); P.c(live_set, path)
-    P.c(path, num, 0, 1); P.c(path, den, 0, 1)
-    P.c(num, sig, 0, 0); P.c(den, sig, 0, 1); P.c(sig, sig_msg); P.c(sig_msg, adapter)
-
-    # --- transport observer: release everything on stop, adopt pending banks on start
-    playing = P.obj("live.observer @property is_playing", 1000, Y + 90, ins=2, outs=2)
+    observe = P.msg("observe", 1000, Y + 30)
     started = P.obj("sel 0 1", 1000, Y + 120, ins=3, outs=3)
     release_all = P.msg("releaseall", 1000, Y + 150)
     rollcall = P.msg("rollcall", 1100, Y + 30)
     load = P.obj("loadbang", 1200, Y)
-    P.c(path, playing, 0, 1); P.c(playing, started)
-    P.c(playing, note_gate, 0, 0)
+    P.c(here, observe); P.c(observe, adapter)
+    P.c(adapter, started, 5)
+    stopped_now = P.obj("== 0", 1100, Y + 90, ins=2)  # 1 while the transport is stopped
+    P.c(adapter, stopped_now, 5)
     P.c(started, release_all, 0); P.c(release_all, bus)
     late_release = P.obj("delay 50", 1100, Y + 150, ins=2)   # catch any straggler after the stop
     P.c(started, late_release, 0); P.c(late_release, release_all)
+    P.c(here, rollcall); P.c(rollcall, bus)          # ask Voices that loaded before us to announce
+    # [DEBUG-hang] probes: report transport changes and release sends into the stress log
+    probe_bus = P.obj("send pf4.test", 1500, Y + 200)
+    for src, outlet_n, label, px in [(adapter, 5, "isplaying", 1600), (release_all, 0, "hubsent", 1700)]:
+        tag = P.obj(f"prepend hubdebug {label}", px, Y + 170)
+        P.c(src, tag, outlet_n); P.c(tag, probe_bus)
+    debug_req = P.obj("receive pf4.debugreq", 1000, Y - 30, ins=0)
+    P.c(debug_req, observe)
     # position readouts: poll song position and let the engine's locate() describe each Lane
     poll = P.obj("metro 100 @active 1", 1300, Y, ins=2)
     poll_pos = P.obj("transport", 1300, Y + 30, ins=2, outs=9)
     where = P.obj("prepend where", 1300, Y + 60)
     readouts = P.obj("route 0 1 2 3", 1300, Y + 90, ins=2, outs=5)
     P.c(poll, poll_pos); P.c(poll_pos, where, 7); P.c(where, adapter); P.c(adapter, readouts, 4)
-    P.c(here, rollcall); P.c(rollcall, bus)          # ask Voices that loaded before us to announce
     P.c(load, adapter)                               # render every Lane once
 
     # --- clock: fine tick grid (ticket 01 verdict), fanned out to every Lane
@@ -189,10 +185,14 @@ def build_hub():
         P.c(lane, prep); P.c(prep, adapter)
 
         # pending bank + Cycle length (fractional for odd rates), held until adopted
+        arrived = P.obj("t b l", lx, ly + 110, ins=1, outs=2)
         unpack = P.obj("unpack 0 0.", lx, ly + 130, ins=1, outs=2)
         pend_bank = P.obj("i -1", lx, ly + 160, ins=2)
         pend_ticks = P.obj(f"f {len_d * 120}", lx + 60, ly + 160, ins=2)
-        P.c(pending, unpack, n); P.c(unpack, pend_bank, 0, 1); P.c(unpack, pend_ticks, 1, 1)
+        P.c(pending, arrived, n); P.c(arrived, unpack, 1)
+        P.c(unpack, pend_bank, 0, 1); P.c(unpack, pend_ticks, 1, 1)
+        when_stopped = P.obj("gate 1 1", lx + 120, ly + 130, ins=2)  # stopped: take it up now, not at play
+        P.c(arrived, when_stopped, 0, 1); P.c(stopped_now, when_stopped, 0, 0)
 
         # player: position = (song mod Reset period) mod Cycle length, exactly as the engine's locate()
         where = "fmod(fmod($f1,$f3),$f2)"
@@ -223,7 +223,7 @@ def build_hub():
         to_adapter = P.obj(f"prepend adopt {n}", lx + 160, ly + 440)
         release = P.msg(f"release {n + 1}", lx + 60, ly + 470)  # 4×mono: Lane n+1 plays Voice n+1
         clear_pending = P.msg("-1", lx + 140, ly + 470)
-        P.c(is_new, adopt_now); P.c(adopt_now, pend_bank); P.c(pend_bank, has_pending)
+        P.c(is_new, adopt_now); P.c(when_stopped, adopt_now); P.c(adopt_now, pend_bank); P.c(pend_bank, has_pending)
         P.c(has_pending, adopt_t, 1)
         P.c(adopt_t, pend_ticks, 3); P.c(pend_ticks, pos_now, 0, 1); P.c(pend_ticks, key, 0, 1)
         P.c(adopt_t, bank_key, 2); P.c(bank_key, key, 0, 3)
@@ -242,7 +242,7 @@ def build_voice():
     V.comment("= chain number; set this chain's External Instrument to the same MIDI channel", 4, 48, 170)
 
     rcv = V.obj(f"receive {VOICE_BUS}", 4, 200, ins=0)
-    route = V.obj("route release releaseall rollcall", 4, 230, ins=2, outs=4)
+    route = V.obj("route release releaseall rollcall report", 4, 230, ins=2, outs=5)
     held = V.obj("flush", 4, 440, ins=2, outs=2)  # remembers sounding notes; bang releases them
     # "release <voice>": only when it's addressed to us
     rel_mine = V.obj("expr $i1 == $i2", 250, 260, ins=2)
@@ -261,7 +261,13 @@ def build_voice():
     pk = V.obj("pack 0 0", 4, 470, ins=2)
     fmt = V.obj("midiformat 1", 4, 500, ins=7, outs=2)
     out = V.obj("midiout", 4, 530, ins=1, outs=0)
-    V.c(route, split, 3)
+    V.c(route, split, 4)
+    # [DEBUG-hang] stress-test tracking: every note sent out is also counted, and reported on request
+    track = V.obj("prepend note", 200, 500)
+    report = V.obj("prepend report", 400, 260)
+    mark = V.msg("mark", 330, 260)
+    V.c(pk, track); V.c(track, brain); V.c(route, report, 3); V.c(report, brain)
+    V.c(route, mark, 1); V.c(mark, brain)
     V.c(split, who, 1); V.c(who, mine); V.c(mine, gate, 0, 0)   # right first: is it for this Voice?
     V.c(split, body, 0); V.c(body, gate, 1, 1)                  # then pass [pitch velocity]
     V.c(gate, held); V.c(held, pk, 0, 0); V.c(held, pk, 1, 1); V.c(pk, fmt); V.c(fmt, out)
@@ -272,7 +278,22 @@ def build_voice():
     V.save_amxd("PF4 Voice.amxd", 180)
 
 
+def build_debug_stress():
+    """[DEBUG-hang] temporary stop stress-test device; delete with the rest of the DEBUG-hang code."""
+    S = Patch()
+    S.comment("PF4 Stress Test (debug)", 4, 2, 180)
+    start = S.msg("run 200", 4, 26)
+    quick = S.msg("run 20", 4, 52)
+    status = S.msg("idle", 70, 26)
+    brain = S.codebox(embedded("debug-stress.js"), 4, 300, ins=1, outs=2)
+    results = S.obj("receive pf4.test", 250, 200, ins=0)
+    log = S.obj("text", 4, 400, ins=1, outs=3)
+    S.c(start, brain); S.c(quick, brain); S.c(results, brain); S.c(brain, log, 0); S.c(brain, status, 1)
+    S.save_amxd("PF4 Stress Test.amxd", 200)
+
+
 if __name__ == "__main__":
     build_hub()
     build_voice()
+    build_debug_stress()
     print("built PF4 Hub.amxd, PF4 Voice.amxd")

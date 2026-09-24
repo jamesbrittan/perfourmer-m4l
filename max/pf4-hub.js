@@ -4,8 +4,9 @@
 // boundary and replies "adopt <lane> <bank>".
 autowatch = 1;
 inlets = 1;
-outlets = 5; // 0: table edits, 1: "<lane> <bank> <cycleTicks>" pending (bank -1 = withdrawn), 2: Voice status text,
-// 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts
+outlets = 6; // 0: table edits, 1: "<lane> <bank> <cycleTicks>" pending (bank -1 = withdrawn), 2: Voice status text,
+// 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts,
+// 5: transport running (1) / stopped (0)
 
 const { createEngine, RATES } = require("pf4-engine.js");
 
@@ -28,6 +29,29 @@ const adoptedBank = params.map(() => 1); // so each Lane's first render lands in
 function lane(n, hits, length, rotate, rateIndex) {
   params[n] = { hits, length, rotate, rate: RATES[rateIndex] };
   render(n);
+}
+
+// Once the Live API is ready (live.thisdevice): watch the transport and the time signature.
+const observers = [];
+function observe() {
+  observers.length = 0;
+  const watch = (property, onChange) => {
+    const api = new LiveAPI((args) => {
+      if (args[0] === property) onChange(args[1]);
+    }, "live_set");
+    api.property = property;
+    observers.push(api);
+  };
+  const signature = { numerator: 4, denominator: 4 };
+  watch("is_playing", (playing) => outlet(5, playing ? 1 : 0));
+  watch("signature_numerator", (n) => {
+    signature.numerator = n;
+    timesig(signature.numerator, signature.denominator);
+  });
+  watch("signature_denominator", (d) => {
+    signature.denominator = d;
+    timesig(signature.numerator, signature.denominator);
+  });
 }
 
 function reset(bars) {
