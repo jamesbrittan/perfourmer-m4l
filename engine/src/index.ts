@@ -17,13 +17,26 @@ const RATE_TICKS = {
 export type Rate = keyof typeof RATE_TICKS;
 /** Rate names in menu order (slowest first); the Hub's Rate control indexes into this. */
 export const RATES = Object.keys(RATE_TICKS) as Rate[];
-export type LaneParams = { hits: number; length: number; rotate: number; rate?: Rate };
+/** pitchCycle: scale degrees, one per hit (0 = the Scale's root nearest middle C), shifted by transpose
+ * degrees and octave octaves. */
+export type LaneParams = {
+  hits: number;
+  length: number;
+  rotate: number;
+  rate?: Rate;
+  pitchCycle?: number[];
+  transpose?: number;
+  octave?: number;
+};
+/** Live's global scale: root 0–11 (C = 0) and the semitone intervals of its notes. */
+export type Scale = { root: number; intervals: number[] };
 /** resetBars 0 = never; ticksPerBar follows Live's time signature (4/4 = 1920). */
-export type EngineConfig = { lanes: LaneParams[]; resetBars?: number; ticksPerBar?: number };
+export type EngineConfig = { lanes: LaneParams[]; scale?: Scale; resetBars?: number; ticksPerBar?: number };
 /** One player grid slot: the [voice, pitch, velocity] messages due there (velocity 0 = note-off). */
 export type Slot = { slot: number; notes: [number, number, number][] };
 
-const PITCH = 60; // fixed middle C until Pitch Cycles arrive
+const MIDDLE_C = 60;
+const C_MAJOR: Scale = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
 const GATE = 0.5; // fraction of a step, until articulation arrives
 const VELOCITY = 100;
 
@@ -44,6 +57,15 @@ function bjorklund(hits: number, length: number): boolean[] {
 
 type Note = Omit<Event, "voice">;
 
+const clampToMidi = (note: number) => Math.max(0, Math.min(127, note));
+
+/** A scale degree as a MIDI note: degrees past the Scale's last note carry on into the next octave. */
+function degreeToNote(degree: number, { root, intervals }: Scale): number {
+  const octave = Math.floor(degree / intervals.length);
+  const index = degree - octave * intervals.length;
+  return MIDDLE_C + root + intervals[index] + 12 * octave;
+}
+
 /** Voice Layout: which Voice plays each of a Lane's notes. The MVP layout is 4×mono (Lane n → Voice n). */
 function allocate(lane: number, notes: Note[]): Event[] {
   return notes.map((note) => ({ ...note, voice: lane + 1 }));
@@ -51,18 +73,24 @@ function allocate(lane: number, notes: Note[]): Event[] {
 
 export function createEngine() {
   let lanes: LaneParams[] = [];
+  let scale = C_MAJOR;
   let resetTicks = 0; // 0 = Lanes never realign
   const voiceDevices = new Map<number, number>(); // Voice device id -> Voice number
 
-  function renderCycle(lane: number, _cycleIndex: number): Event[] {
-    const { hits, length, rotate } = lanes[lane];
+  function renderCycle(lane: number, cycleIndex: number): Event[] {
+    const { hits, length, rotate, pitchCycle = [0], transpose = 0, octave = 0 } = lanes[lane];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
     const rotated = pattern.map((_, step) => pattern[(step - shift + length) % length]);
     const step = stepTicks(lane);
-    const notes = rotated.flatMap((hit, i) =>
-      hit ? [{ onset: i * step, duration: step * GATE, pitch: PITCH, velocity: VELOCITY }] : [],
-    );
+    const onsets = rotated.flatMap((hit, i) => (hit ? [i * step] : []));
+    const hitsBefore = cyclesSinceReset(lane, cycleIndex) * onsets.length; // the Pitch Cycle realigns at each Reset
+    const notes = onsets.map((onset, hit) => ({
+      onset,
+      duration: step * GATE,
+      pitch: clampToMidi(degreeToNote(pitchCycle[(hitsBefore + hit) % pitchCycle.length] + transpose, scale) + 12 * octave),
+      velocity: VELOCITY,
+    }));
     return allocate(lane, notes);
   }
 
@@ -74,26 +102,34 @@ export function createEngine() {
     return lanes[lane].length * stepTicks(lane);
   }
 
+  /** Cycles per Reset period (the last one may be cut short); Cycle numbers keep rising across Resets. */
+  function cyclesPerPeriod(lane: number): number {
+    return resetTicks ? Math.ceil(resetTicks / cycleTicks(lane)) : Infinity;
+  }
+
+  function cyclesSinceReset(lane: number, cycleIndex: number): number {
+    return cycleIndex % cyclesPerPeriod(lane);
+  }
+
   /** Where a Lane is at a song position: which Cycle, and how far into it. */
   function locate(lane: number, songTicks: number) {
     const cycle = cycleTicks(lane);
     const period = resetTicks ? Math.floor(songTicks / resetTicks) : 0;
     const sinceReset = resetTicks ? songTicks % resetTicks : songTicks;
-    const cyclesPerPeriod = resetTicks ? Math.ceil(resetTicks / cycle) : 0; // keeps Cycle numbers rising across Resets
     return {
-      cycleIndex: period * cyclesPerPeriod + Math.floor(sinceReset / cycle),
+      cycleIndex: (period ? period * cyclesPerPeriod(lane) : 0) + Math.floor(sinceReset / cycle),
       offsetTicks: sinceReset % cycle,
     };
   }
 
-  /** The Cycle as the fine-grid player reads it: messages grouped by grid slot, in slot order. */
-  function slotTable(lane: number, gridTicks: number): Slot[] {
+  /** A Cycle as the fine-grid player reads it: messages grouped by grid slot, in slot order. */
+  function slotTable(lane: number, gridTicks: number, cycleIndex = 0): Slot[] {
     const slots = new Map<number, Slot["notes"]>();
     const at = (tick: number, note: [number, number, number]) => {
       const slot = Math.round(tick / gridTicks);
       slots.set(slot, [...(slots.get(slot) ?? []), note]);
     };
-    for (const e of renderCycle(lane, 0)) {
+    for (const e of renderCycle(lane, cycleIndex)) {
       at(e.onset, [e.voice, e.pitch, e.velocity]);
       at(e.onset + e.duration, [e.voice, e.pitch, 0]);
     }
@@ -103,6 +139,7 @@ export function createEngine() {
   return {
     configure(config: EngineConfig) {
       lanes = config.lanes;
+      scale = config.scale ?? C_MAJOR;
       resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
     },
     cycleTicks,
