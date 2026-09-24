@@ -1,6 +1,6 @@
 # PROTOTYPE — timing (throwaway)
 
-**Question:** can a native, transport-synced Max player send pre-rendered events to four Voice tracks tightly enough, and which mechanism should the real player use?
+**Question:** can a native, transport-synced Max player send pre-rendered events to four Voice Chains tightly enough, and which mechanism should the real player use?
 
 - **A, fine grid:** a `metro` every 8 ticks, quantised to Live's transport, looks up a table of per-slot events.
 - **B, scheduled delays:** at each bar start, every event for that bar goes into a `pipe` with a delay worked out from the tempo.
@@ -12,28 +12,27 @@ The events are hard-coded. Each bar is 1920 ticks at 480 PPQ.
 - **V4:** gap-gate ties that overlap by 8 ticks.
 - **Chord test:** all four voices hit at tick 0 of every bar.
 
-Edit `gen.py` and run `python3 gen.py` to regenerate the two `.maxpat` abstractions.
+`python3 gen.py` builds the finished devices (`PF4 Proto Hub.amxd`, `PF4 Proto Voice.amxd`). There's no patching in Max.
 
-## Setup in Live (~5 min)
+## Setup in Live (~3 min, all standard Live actions)
 
-1. **Perfourmer:** set Play Mode M1. Put synth ch 1–4 on MIDI ch 1–4. Turn Edit param 3 (aftertouch → cutoff) on, and turn on legato/auto-glide (params 5 and 6) for the voice 4 tie test.
-2. **One MIDI track** holds everything:
-   ```
-   PF4 Proto Hub  →  Instrument Rack
-                       ├─ Chain 1: PF4 Proto Voice (voice 1) → External Instrument (Perfourmer, Ch 1)
-                       ├─ Chain 2: PF4 Proto Voice (voice 2) → External Instrument (Perfourmer, Ch 2)
-                       ├─ Chain 3: PF4 Proto Voice (voice 3) → External Instrument (Perfourmer, Ch 3)
-                       └─ Chain 4: PF4 Proto Voice (voice 4) → External Instrument (Perfourmer, Ch 4)
-   ```
-   If the track stays silent, set its Monitor to **In**.
-3. **Hub device:**
-   - Drag a **Max MIDI Effect** onto the track and click Edit.
-   - **Save As** `PF4 Proto Hub.amxd` **inside this `timing` folder**, next to the `.maxpat` files, so Max can find them.
-   - Add an object `bpatcher @name pf4.proto.player.maxpat` near the top-left, resize it to about 420×130, then save and close.
-4. **Voice device:**
-   - Build it the same way: save it as `PF4 Proto Voice.amxd` in this folder, then add `bpatcher @name pf4.proto.voice.maxpat` at about 300×50.
-   - Put it at the start of each of the four rack chains and set its **voice** box to 1–4.
-5. If Max can't find the abstractions, go to the device editor → Options → File Preferences and add this folder.
+1. **Perfourmer (once):**
+   - Play Mode M1, with synth ch 1–4 on MIDI ch 1–4.
+   - Edit param 3 (aftertouch → cutoff) on.
+   - Params 5 and 6 (auto-glide, legato) on.
+2. **New MIDI track.** From Finder, drag `PF4 Proto Voice.amxd` onto it.
+3. **Make it a rack:** click the Voice device's title bar and press **Cmd+G**, which wraps it in an Instrument Rack.
+4. **Finish chain 1:**
+   - From the browser (Instruments → External Instrument), drag an **External Instrument** into the chain, *after* the Voice device.
+   - Set MIDI To = your Perfourmer port, **Ch 1**.
+5. **Make chains 2–4:**
+   - Show the chain list (the rack's leftmost toggle), select the chain and press **Cmd+D** three times.
+   - Set the External Instrument in chains 2, 3 and 4 to **Ch 2, 3, 4**. That's the only per-chain setting.
+   - Each Voice device detects its own voice number from its chain position and shows it.
+6. **Add the Hub:** drag `PF4 Proto Hub.amxd` onto the track, *before* the rack.
+7. **Optional:** save the rack as a preset (rack title bar → Save icon) so you never have to rebuild it.
+
+If the track stays silent, set its Monitor to **In**.
 
 ## What to measure
 

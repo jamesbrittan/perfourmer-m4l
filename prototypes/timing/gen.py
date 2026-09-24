@@ -1,12 +1,12 @@
 """PROTOTYPE — throwaway. Generates the timing-prototype Max abstractions.
 
-Run: python3 gen.py   (writes pf4.proto.player.maxpat and pf4.proto.voice.maxpat next to this file)
+Run: python3 gen.py   (writes "PF4 Proto Hub.amxd", "PF4 Proto Voice.amxd" and pf4.proto.voiceindex.js next to this file)
 
 Question: can a native, transport-synced Max player emit pre-rendered events tightly enough?
 Mechanism A = fine tick grid (metro every 8 ticks polls a slot table).
 Mechanism B = scheduled delays (at each bar start, every event is queued in a pipe).
 """
-import json, os
+import json, os, struct
 
 BAR = 1920  # ticks per 4/4 bar at 480 PPQ
 GRID = 8    # mechanism A grid, ticks; every onset/offset below is a multiple of 8
@@ -78,14 +78,26 @@ class Patch:
         return self.add("toggle", x, y, w=22, ins=1, outs=1)
     def c(self, a, b, outlet=0, inlet=0):
         self.lines.append({"patchline": {"source": [a, outlet], "destination": [b, inlet]}})
-    def save(self, path):
+    def save_amxd(self, path, width):
+        """Write a finished Max MIDI Effect device (layout copied from a device saved by Max 9.1)."""
         doc = {"patcher": {"fileversion": 1,
-                           "appversion": {"major": 9, "minor": 1, "revision": 0,
+                           "appversion": {"major": 9, "minor": 1, "revision": 5,
                                           "architecture": "x64", "modernui": 1},
                            "classnamespace": "box", "rect": [100, 100, 1100, 800],
+                           "openrect": [0.0, 0.0, float(width), 169.0], "openrectmode": 0,
+                           "default_fontsize": 10.0, "default_fontname": "Arial Bold",
+                           "gridsize": [8.0, 8.0], "latency": 0, "is_mpe": 0,
+                           "project": {"version": 1, "contents": {"patchers": {}}, "layout": {},
+                                       "searchpath": {}, "amxdtype": 1835887981,  # 'mmmm' = MIDI effect
+                                       "readonly": 0, "devpathtype": 0, "devpath": ".",
+                                       "sortmode": 0, "viewmode": 0, "includepackages": 0},
                            "boxes": self.boxes, "lines": self.lines}}
-        with open(path, "w") as f:
-            json.dump(doc, f, indent=1)
+        body = json.dumps(doc, indent=1).encode() + b"\0"
+        header = (b"ampf" + struct.pack("<I", 4) + b"mmmm" +
+                  b"meta" + struct.pack("<I", 4) + struct.pack("<I", 1) +
+                  b"ptch" + struct.pack("<I", len(body)))
+        with open(path, "wb") as f:
+            f.write(header + body)
 
 here = os.path.dirname(os.path.abspath(__file__))
 
@@ -201,7 +213,7 @@ stopped = P.obj("sel 0", 900, Y + 330, ins=2, outs=2)
 panic = P.msg("panic", 900, Y + 360); clear = P.msg("clear", 980, Y + 360)
 P.c(poll, tr_s); P.c(tr_s, chg, 6); P.c(chg, stopped); P.c(stopped, panic); P.c(stopped, clear)
 P.c(panic, out_send); P.c(clear, pipe)
-P.save(os.path.join(here, "pf4.proto.player.maxpat"))
+P.save_amxd(os.path.join(here, "PF4 Proto Hub.amxd"), 420)
 
 # ---- voice ----------------------------------------------------------------------------------
 V = Patch()
@@ -239,6 +251,22 @@ lc = V.obj("counter", 300, 230, ins=5, outs=4)
 sine = V.obj("expr int(63.5+63.5*sin($i1*0.0628318/$i2))", 300, 260, ins=2)
 V.c(voice_n, sine, 0, 1)
 V.c(at_on, lfo); V.c(lfo, lc); V.c(lc, sine); V.c(sine, mf, 0, 4)
-V.save(os.path.join(here, "pf4.proto.voice.maxpat"))
+# voice number = position of this device's rack chain (chain 1 -> voice 1), found via the Live API once loaded
+V.comment("auto: chain N = voice N. Set this chain's External Instrument to Ch N.", 4, 52, 290)
+thisdev = V.obj("live.thisdevice", 450, 200, ins=1, outs=3)
+chain_js = V.obj("js pf4.proto.voiceindex.js", 450, 230)
+V.c(thisdev, chain_js); V.c(chain_js, voice_n)
+V.save_amxd(os.path.join(here, "PF4 Proto Voice.amxd"), 300)
+
+with open(os.path.join(here, "pf4.proto.voiceindex.js"), "w") as f:
+    f.write('''// PROTOTYPE — outputs this device's rack chain number (1-based); 1 if not inside a rack.
+autowatch = 1;
+outlets = 1;
+function bang() {
+    var path = new LiveAPI("this_device").unquotedpath; // e.g. live_set tracks 0 devices 1 chains 2 devices 0
+    var m = path.match(/chains (\\d+) devices \\d+$/);
+    outlet(0, m ? parseInt(m[1], 10) + 1 : 1);
+}
+''')
 
 print(f"{len(events)} events, {len(msgs)} on/off messages, {len(slots)} grid slots")
