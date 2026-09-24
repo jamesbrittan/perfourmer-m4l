@@ -1,12 +1,30 @@
 export type Event = { onset: number; duration: number; pitch: number; velocity: number; voice: number };
-export type LaneParams = { hits: number; length: number; rotate: number };
-export type EngineConfig = { lanes: LaneParams[] };
+/** Step length in ticks at 480 PPQ, slowest first. Q = quintuplet, T = triplet, S = septuplet. */
+const RATE_TICKS = {
+  "1/1": 1920,
+  "1/2": 960,
+  "1/4": 480,
+  "1/4T": 320,
+  "1/8": 240,
+  "1/8T": 160,
+  "1/16": 120,
+  "1/16Q": 96,
+  "1/16T": 80,
+  "1/16S": 480 / 7,
+  "1/32": 60,
+  "1/32Q": 48,
+} as const;
+export type Rate = keyof typeof RATE_TICKS;
+/** Rate names in menu order (slowest first); the Hub's Rate control indexes into this. */
+export const RATES = Object.keys(RATE_TICKS) as Rate[];
+export type LaneParams = { hits: number; length: number; rotate: number; rate?: Rate };
+/** resetBars 0 = never; ticksPerBar follows Live's time signature (4/4 = 1920). */
+export type EngineConfig = { lanes: LaneParams[]; resetBars?: number; ticksPerBar?: number };
 /** One player grid slot: the [voice, pitch, velocity] messages due there (velocity 0 = note-off). */
 export type Slot = { slot: number; notes: [number, number, number][] };
 
-const STEP_TICKS = 120; // fixed 1/16 at 480 PPQ until Lane rates arrive
 const PITCH = 60; // fixed middle C until Pitch Cycles arrive
-const GATE_TICKS = STEP_TICKS / 2;
+const GATE = 0.5; // fraction of a step, until articulation arrives
 const VELOCITY = 100;
 
 /** Bjorklund's algorithm: the Euclidean rhythms as tabulated by Toussaint (first hit on step 0). */
@@ -33,6 +51,7 @@ function allocate(lane: number, notes: Note[]): Event[] {
 
 export function createEngine() {
   let lanes: LaneParams[] = [];
+  let resetTicks = 0; // 0 = Lanes never realign
   const voiceDevices = new Map<number, number>(); // Voice device id -> Voice number
 
   function renderCycle(lane: number, _cycleIndex: number): Event[] {
@@ -40,14 +59,31 @@ export function createEngine() {
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
     const rotated = pattern.map((_, step) => pattern[(step - shift + length) % length]);
-    const notes = rotated.flatMap((hit, step) =>
-      hit ? [{ onset: step * STEP_TICKS, duration: GATE_TICKS, pitch: PITCH, velocity: VELOCITY }] : [],
+    const step = stepTicks(lane);
+    const notes = rotated.flatMap((hit, i) =>
+      hit ? [{ onset: i * step, duration: step * GATE, pitch: PITCH, velocity: VELOCITY }] : [],
     );
     return allocate(lane, notes);
   }
 
+  function stepTicks(lane: number): number {
+    return RATE_TICKS[lanes[lane].rate ?? "1/16"];
+  }
+
   function cycleTicks(lane: number): number {
-    return lanes[lane].length * STEP_TICKS;
+    return lanes[lane].length * stepTicks(lane);
+  }
+
+  /** Where a Lane is at a song position: which Cycle, and how far into it. */
+  function locate(lane: number, songTicks: number) {
+    const cycle = cycleTicks(lane);
+    const period = resetTicks ? Math.floor(songTicks / resetTicks) : 0;
+    const sinceReset = resetTicks ? songTicks % resetTicks : songTicks;
+    const cyclesPerPeriod = resetTicks ? Math.ceil(resetTicks / cycle) : 0; // keeps Cycle numbers rising across Resets
+    return {
+      cycleIndex: period * cyclesPerPeriod + Math.floor(sinceReset / cycle),
+      offsetTicks: sinceReset % cycle,
+    };
   }
 
   /** The Cycle as the fine-grid player reads it: messages grouped by grid slot, in slot order. */
@@ -67,8 +103,10 @@ export function createEngine() {
   return {
     configure(config: EngineConfig) {
       lanes = config.lanes;
+      resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
     },
     cycleTicks,
+    locate,
     renderCycle,
     slotTable,
     voiceJoined(deviceId: number, voice: number) {
