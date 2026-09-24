@@ -24,17 +24,26 @@ function bjorklund(hits: number, length: number): boolean[] {
   return groups.concat(remainder).flat();
 }
 
+type Note = Omit<Event, "voice">;
+
+/** Voice Layout: which Voice plays each of a Lane's notes. The MVP layout is 4×mono (Lane n → Voice n). */
+function allocate(lane: number, notes: Note[]): Event[] {
+  return notes.map((note) => ({ ...note, voice: lane + 1 }));
+}
+
 export function createEngine() {
   let lanes: LaneParams[] = [];
+  const voiceDevices = new Map<number, number>(); // Voice device id -> Voice number
 
   function renderCycle(lane: number, _cycleIndex: number): Event[] {
     const { hits, length, rotate } = lanes[lane];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
     const rotated = pattern.map((_, step) => pattern[(step - shift + length) % length]);
-    return rotated.flatMap((hit, step) =>
-      hit ? [{ onset: step * STEP_TICKS, duration: GATE_TICKS, pitch: PITCH, velocity: VELOCITY, voice: lane + 1 }] : [],
+    const notes = rotated.flatMap((hit, step) =>
+      hit ? [{ onset: step * STEP_TICKS, duration: GATE_TICKS, pitch: PITCH, velocity: VELOCITY }] : [],
     );
+    return allocate(lane, notes);
   }
 
   function cycleTicks(lane: number): number {
@@ -62,5 +71,17 @@ export function createEngine() {
     cycleTicks,
     renderCycle,
     slotTable,
+    voiceJoined(deviceId: number, voice: number) {
+      voiceDevices.set(deviceId, voice);
+    },
+    voiceLeft(deviceId: number) {
+      voiceDevices.delete(deviceId);
+    },
+    voiceStatus() {
+      const claims = new Map<number, number>();
+      for (const voice of voiceDevices.values()) claims.set(voice, (claims.get(voice) ?? 0) + 1);
+      const connected = [...claims.keys()].sort((a, b) => a - b);
+      return { connected, duplicates: connected.filter((voice) => claims.get(voice)! > 1) };
+    },
   };
 }

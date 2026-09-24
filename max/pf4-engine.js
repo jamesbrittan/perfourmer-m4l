@@ -40,16 +40,21 @@ function bjorklund(hits, length) {
   } while (remainder.length > 1);
   return groups.concat(remainder).flat();
 }
+function allocate(lane, notes) {
+  return notes.map((note) => ({ ...note, voice: lane + 1 }));
+}
 function createEngine() {
   let lanes = [];
+  const voiceDevices = /* @__PURE__ */ new Map();
   function renderCycle(lane, _cycleIndex) {
     const { hits, length, rotate } = lanes[lane];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
     const rotated = pattern.map((_, step) => pattern[(step - shift + length) % length]);
-    return rotated.flatMap(
-      (hit, step) => hit ? [{ onset: step * STEP_TICKS, duration: GATE_TICKS, pitch: PITCH, velocity: VELOCITY, voice: lane + 1 }] : []
+    const notes = rotated.flatMap(
+      (hit, step) => hit ? [{ onset: step * STEP_TICKS, duration: GATE_TICKS, pitch: PITCH, velocity: VELOCITY }] : []
     );
+    return allocate(lane, notes);
   }
   function cycleTicks(lane) {
     return lanes[lane].length * STEP_TICKS;
@@ -72,6 +77,18 @@ function createEngine() {
     },
     cycleTicks,
     renderCycle,
-    slotTable
+    slotTable,
+    voiceJoined(deviceId, voice) {
+      voiceDevices.set(deviceId, voice);
+    },
+    voiceLeft(deviceId) {
+      voiceDevices.delete(deviceId);
+    },
+    voiceStatus() {
+      const claims = /* @__PURE__ */ new Map();
+      for (const voice of voiceDevices.values()) claims.set(voice, (claims.get(voice) ?? 0) + 1);
+      const connected = [...claims.keys()].sort((a, b) => a - b);
+      return { connected, duplicates: connected.filter((voice) => claims.get(voice) > 1) };
+    }
   };
 }
