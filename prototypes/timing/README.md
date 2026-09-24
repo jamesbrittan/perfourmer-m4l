@@ -47,17 +47,17 @@ Press **reset stats** after starting playback, since the first bar includes star
 
 | Check | A (grid) | B (scheduled) |
 |---|---|---|
-| max \|late\| ms at 120 BPM, buffer 128 | | |
+| max \|late\| ms at 120 BPM (readout invalid, always 0) | 0 | 0 |
 | max \|late\| ms at 120 BPM, buffer 512 | | |
-| slot errors after 2 min | | — |
+| dropped/doubled events (3000 sent) | 0 | 0 |
 | tempo automation 100→140 BPM: anything wrong? | | |
-| audible difference by ear (V3 quintuplets) | | |
+| audible difference by ear (V3 quintuplets) | none | none |
 
 Hardware checks:
 - [x] External Instruments in separate rack chains keep their own MIDI channels (single-track design)
 - [x] All four voices play independent lines (M1 with 4 channels)
 - [ ] V4 ties glide/legato
-- [ ] AT LFO on each voice sweeps that voice's filter only (voice 1 has a 2 s cycle, voice 4 an 8 s cycle)
+- [x] AT LFO on each voice sweeps that voice's filter only (voice 1 has a 2 s cycle, voice 4 an 8 s cycle)
 - [ ] Chord skew at tick 0. Record the Perfourmer's audio output and measure the gap between the four onsets, or spy the port with MIDI Monitor (snoize).
 - [ ] Transport stop leaves no hanging notes
 
@@ -65,4 +65,11 @@ Hardware checks:
 
 - **2026-09-24: single-track routing confirmed.** One track with the Hub followed by an Instrument Rack of four Voice Chains (Voice device → External Instrument, ch 1–4) plays four independent lines on the Perfourmer, in time. The Voice devices detected their chain numbers correctly.
 
-_(timing measurements still to come; summarised on issue #2)_
+- **Reliability:** 0 dropped or doubled events in 3000 per mechanism. No audible difference between A and B, including on V3's quintuplets.
+- **Lateness readout was always 0.** Max reports each event's *scheduled* time, so measuring from inside the patch can't see jitter. Real timing has to be measured from recorded audio, which moves to issue #3.
+- **Stuck notes:**
+  - Switching mechanism mid-bar dropped A's pending note-offs (fixed here by releasing all notes on every switch).
+  - Stopping the transport between a note-on and its note-off occasionally left a note hanging, because stops are only noticed by checking the transport every 50 ms.
+  - **Lesson:** the player must track sounding notes and release them whenever the schedule changes, and stops must be detected by a Live API observer.
+- **Aftertouch LFO** sweeps each voice's filter independently ✅. Glide on ties was inconclusive (8-tick overlap; Glide knob probably low), so it moves to issue #7.
+- **Verdict: mechanism A.** A transport-synced fine grid (`metro N ticks @quantize N ticks`) that looks up pre-rendered events at play time. It follows tempo changes for free, and live edits need no cancelling of already-scheduled notes. B's pre-scheduled queue makes both harder.
