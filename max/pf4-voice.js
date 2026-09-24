@@ -32,39 +32,3 @@ function notifydeleted() {
   if (deviceId) messnamed("pf4.hub", "bye", deviceId);
 }
 
-// [DEBUG-hang] stop stress test: track notes the way the synth does (one note-off ends a note), count anomalies,
-// and keep the recent event history so a hang can be explained
-var sounding = {};
-var doubleOns = 0;
-var strayOffs = 0;
-var history = [];
-
-function remember(event) {
-  history.push(event + "@" + (Date.now() % 100000));
-  if (history.length > 8) history.shift();
-}
-
-function note(pitch, velocity) {
-  if (velocity > 0) {
-    if (sounding[pitch]) doubleOns++;
-    sounding[pitch] = true;
-    remember("on" + pitch);
-  } else {
-    if (!sounding[pitch]) strayOffs++;
-    sounding[pitch] = false;
-    remember("off" + pitch);
-  }
-}
-
-function mark() {
-  remember("RELEASEALL");
-}
-
-function report(run) {
-  var held = [];
-  for (var pitch in sounding) if (sounding[pitch]) held.push(pitch);
-  messnamed("pf4.test", "held", run, voice, held.length, held.length ? held.join("-") : "none",
-    "doubleOns", doubleOns, "strayOffs", strayOffs, "history", history.join(","));
-  doubleOns = 0;
-  strayOffs = 0;
-}

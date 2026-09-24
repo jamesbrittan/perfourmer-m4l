@@ -139,13 +139,6 @@ def build_hub():
     late_release = P.obj("delay 50", 1100, Y + 150, ins=2)   # catch any straggler after the stop
     P.c(started, late_release, 0); P.c(late_release, release_all)
     P.c(here, rollcall); P.c(rollcall, bus)          # ask Voices that loaded before us to announce
-    # [DEBUG-hang] probes: report transport changes and release sends into the stress log
-    probe_bus = P.obj("send pf4.test", 1500, Y + 200)
-    for src, outlet_n, label, px in [(adapter, 5, "isplaying", 1600), (release_all, 0, "hubsent", 1700)]:
-        tag = P.obj(f"prepend hubdebug {label}", px, Y + 170)
-        P.c(src, tag, outlet_n); P.c(tag, probe_bus)
-    debug_req = P.obj("receive pf4.debugreq", 1000, Y - 30, ins=0)
-    P.c(debug_req, observe)
     # position readouts: poll song position and let the engine's locate() describe each Lane
     poll = P.obj("metro 100 @active 1", 1300, Y, ins=2)
     poll_pos = P.obj("transport", 1300, Y + 30, ins=2, outs=9)
@@ -242,7 +235,7 @@ def build_voice():
     V.comment("= chain number; set this chain's External Instrument to the same MIDI channel", 4, 48, 170)
 
     rcv = V.obj(f"receive {VOICE_BUS}", 4, 200, ins=0)
-    route = V.obj("route release releaseall rollcall report", 4, 230, ins=2, outs=5)
+    route = V.obj("route release releaseall rollcall", 4, 230, ins=2, outs=4)
     held = V.obj("flush", 4, 440, ins=2, outs=2)  # remembers sounding notes; bang releases them
     # "release <voice>": only when it's addressed to us
     rel_mine = V.obj("expr $i1 == $i2", 250, 260, ins=2)
@@ -261,13 +254,7 @@ def build_voice():
     pk = V.obj("pack 0 0", 4, 470, ins=2)
     fmt = V.obj("midiformat 1", 4, 500, ins=7, outs=2)
     out = V.obj("midiout", 4, 530, ins=1, outs=0)
-    V.c(route, split, 4)
-    # [DEBUG-hang] stress-test tracking: every note sent out is also counted, and reported on request
-    track = V.obj("prepend note", 200, 500)
-    report = V.obj("prepend report", 400, 260)
-    mark = V.msg("mark", 330, 260)
-    V.c(pk, track); V.c(track, brain); V.c(route, report, 3); V.c(report, brain)
-    V.c(route, mark, 1); V.c(mark, brain)
+    V.c(route, split, 3)
     V.c(split, who, 1); V.c(who, mine); V.c(mine, gate, 0, 0)   # right first: is it for this Voice?
     V.c(split, body, 0); V.c(body, gate, 1, 1)                  # then pass [pitch velocity]
     V.c(gate, held); V.c(held, pk, 0, 0); V.c(held, pk, 1, 1); V.c(pk, fmt); V.c(fmt, out)
@@ -278,22 +265,7 @@ def build_voice():
     V.save_amxd("PF4 Voice.amxd", 180)
 
 
-def build_debug_stress():
-    """[DEBUG-hang] temporary stop stress-test device; delete with the rest of the DEBUG-hang code."""
-    S = Patch()
-    S.comment("PF4 Stress Test (debug)", 4, 2, 180)
-    start = S.msg("run 200", 4, 26)
-    quick = S.msg("run 20", 4, 52)
-    status = S.msg("idle", 70, 26)
-    brain = S.codebox(embedded("debug-stress.js"), 4, 300, ins=1, outs=2)
-    results = S.obj("receive pf4.test", 250, 200, ins=0)
-    log = S.obj("text", 4, 400, ins=1, outs=3)
-    S.c(start, brain); S.c(quick, brain); S.c(results, brain); S.c(brain, log, 0); S.c(brain, status, 1)
-    S.save_amxd("PF4 Stress Test.amxd", 200)
-
-
 if __name__ == "__main__":
     build_hub()
     build_voice()
-    build_debug_stress()
     print("built PF4 Hub.amxd, PF4 Voice.amxd")
