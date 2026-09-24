@@ -17,16 +17,22 @@ Edit `gen.py` and run `python3 gen.py` to regenerate the two `.maxpat` abstracti
 ## Setup in Live (~5 min)
 
 1. **Perfourmer:** set Play Mode M1. Put synth ch 1–4 on MIDI ch 1–4. Turn Edit param 3 (aftertouch → cutoff) on, and turn on legato/auto-glide (params 5 and 6) for the voice 4 tie test.
-2. **Tracks:** create 5 MIDI tracks.
-   - **Hub:** MIDI To = No Output.
-   - **V1–V4:** MIDI To = your Perfourmer port, channel 1, 2, 3 and 4 respectively. If a track stays silent, set its Monitor to **In**.
+2. **One MIDI track** holds everything:
+   ```
+   PF4 Proto Hub  →  Instrument Rack
+                       ├─ Chain 1: PF4 Proto Voice (voice 1) → External Instrument (Perfourmer, Ch 1)
+                       ├─ Chain 2: PF4 Proto Voice (voice 2) → External Instrument (Perfourmer, Ch 2)
+                       ├─ Chain 3: PF4 Proto Voice (voice 3) → External Instrument (Perfourmer, Ch 3)
+                       └─ Chain 4: PF4 Proto Voice (voice 4) → External Instrument (Perfourmer, Ch 4)
+   ```
+   If the track stays silent, set its Monitor to **In**.
 3. **Hub device:**
-   - Drag a **Max MIDI Effect** onto the Hub track and click Edit.
-   - Save it as `PF4 Proto Hub.amxd` in this folder, so Max finds the abstractions next to it.
+   - Drag a **Max MIDI Effect** onto the track and click Edit.
+   - **Save As** `PF4 Proto Hub.amxd` **inside this `timing` folder**, next to the `.maxpat` files, so Max can find them.
    - Add an object `bpatcher @name pf4.proto.player.maxpat` near the top-left, resize it to about 420×130, then save and close.
 4. **Voice device:**
    - Build it the same way: save it as `PF4 Proto Voice.amxd` in this folder, then add `bpatcher @name pf4.proto.voice.maxpat` at about 300×50.
-   - Put this one device on tracks V1–V4 and set its **voice** box to 1–4.
+   - Put it at the start of each of the four rack chains and set its **voice** box to 1–4.
 5. If Max can't find the abstractions, go to the device editor → Options → File Preferences and add this folder.
 
 ## What to measure
@@ -49,6 +55,7 @@ Press **reset stats** after starting playback, since the first bar includes star
 | audible difference by ear (V3 quintuplets) | | |
 
 Hardware checks:
+- [ ] External Instruments in separate rack chains keep their own MIDI channels (single-track design)
 - [ ] All four voices play independent lines (M1 with 4 channels)
 - [ ] V4 ties glide/legato
 - [ ] AT LFO on each voice sweeps that voice's filter only (voice 1 has a 2 s cycle, voice 4 an 8 s cycle)
