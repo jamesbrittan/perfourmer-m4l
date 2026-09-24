@@ -4,8 +4,8 @@
 // boundary and replies "adopt <lane> <bank>".
 autowatch = 1;
 inlets = 1;
-outlets = 4; // 0: table edits, 1: "<lane> <bank> <cycleTicks>" pending (bank -1 = withdrawn), 2: Voice status text,
-// 3: Reset period in ticks for the player (NEVER when off)
+outlets = 5; // 0: table edits, 1: "<lane> <bank> <cycleTicks>" pending (bank -1 = withdrawn), 2: Voice status text,
+// 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts
 
 const { createEngine, RATES } = require("pf4-engine.js");
 
@@ -77,6 +77,15 @@ function render(n) {
     return key;
   });
   outlet(1, n, bank, engine.cycleTicks(n));
+}
+
+// song position (polled a few times a second): show where each Lane is, from the engine's own locate()
+function where(songTicks) {
+  for (let n = 0; n < LANES; n++) {
+    const { cycleIndex, offsetTicks } = engine.locate(n, songTicks);
+    const step = Math.floor(offsetTicks / (engine.cycleTicks(n) / params[n].length)) + 1;
+    outlet(4, n, "set", `Cycle ${cycleIndex + 1} · step ${step}/${params[n].length}`);
+  }
 }
 
 function showVoices() {

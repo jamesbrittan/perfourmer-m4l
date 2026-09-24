@@ -103,14 +103,16 @@ def build_hub():
     Y = 220  # logic lives below the visible 169px device area
 
     # --- adapter + shared player table
-    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=4)
+    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=5)
     table = P.obj("coll", 4, Y + 40, ins=1, outs=4)
     shared_notes = P.obj("zl iter 3", 4, Y + 80, ins=2, outs=2)
     pending = P.obj("route 0 1 2 3", 200, Y + 40, ins=2, outs=5)
     bus = P.obj(f"send {VOICE_BUS}", 4, Y + 700)
     hub_in = P.obj(f"receive {HUB_BUS}", 200, Y - 30, ins=0)
     P.c(adapter, table, 0, 0); P.c(adapter, pending, 1); P.c(hub_in, adapter)
-    P.c(table, shared_notes); P.c(shared_notes, bus)
+    # notes only pass while the transport runs, so a tick that races the stop can't start a note
+    note_gate = P.obj("gate 1 1", 4, Y + 110, ins=2)
+    P.c(table, shared_notes); P.c(shared_notes, note_gate, 0, 1); P.c(note_gate, bus)
 
     # --- visible: one 2×2 block per Lane, then status/setup
     P.comment("PF4 Hub", 4, 0, 60)
@@ -143,7 +145,16 @@ def build_hub():
     rollcall = P.msg("rollcall", 1100, Y + 30)
     load = P.obj("loadbang", 1200, Y)
     P.c(path, playing, 0, 1); P.c(playing, started)
+    P.c(playing, note_gate, 0, 0)
     P.c(started, release_all, 0); P.c(release_all, bus)
+    late_release = P.obj("delay 50", 1100, Y + 150, ins=2)   # catch any straggler after the stop
+    P.c(started, late_release, 0); P.c(late_release, release_all)
+    # position readouts: poll song position and let the engine's locate() describe each Lane
+    poll = P.obj("metro 100 @active 1", 1300, Y, ins=2)
+    poll_pos = P.obj("transport", 1300, Y + 30, ins=2, outs=9)
+    where = P.obj("prepend where", 1300, Y + 60)
+    readouts = P.obj("route 0 1 2 3", 1300, Y + 90, ins=2, outs=5)
+    P.c(poll, poll_pos); P.c(poll_pos, where, 7); P.c(where, adapter); P.c(adapter, readouts, 4)
     P.c(here, rollcall); P.c(rollcall, bus)          # ask Voices that loaded before us to announce
     P.c(load, adapter)                               # render every Lane once
 
@@ -162,6 +173,8 @@ def build_hub():
         length = P.param("live.dial", f"L{n + 1} Length", x + 46, 30, 1, 64, len_d, short="Length")
         rotate = P.param("live.dial", f"L{n + 1} Rotate", x, 80, 0, 63, rot_d, short="Rotate")
         rate = P.param("live.dial", f"L{n + 1} Rate", x + 46, 80, 0, 0, DEFAULT_RATE, short="Rate", enum=RATES)
+        readout = P.add("comment", x, 132, w=92, h=30, text="Cycle – · step –", ins=1, outs=0)
+        P.c(readouts, readout, n)
 
         lx = 200 + 300 * n  # this Lane's logic column
         ly = Y + 100
