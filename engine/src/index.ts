@@ -150,14 +150,15 @@ export function createEngine() {
    * come after the note-ons, so consecutive notes join legato. A tied note running into the same pitch is simply
    * held: neither its note-off nor the next note-on is sent.
    * `replacing` is the table this one takes over from part-way through the Cycle (after a Gate change): its
-   * note-offs that come later than the new ones are kept, so a note already sounding is still ended.
+   * note-offs that come later than the new ones are kept (including those it carried into the next Cycle), so a
+   * note already sounding is still ended.
    */
   function cycleTable(
     lane: number,
     gridTicks: number,
     cycleIndex = 0,
     carried: Carry[] = [],
-    replacing: Slot[] = [],
+    replacing: CycleTable = { slots: [], carry: [] },
   ): CycleTable {
     const slotOf = (tick: number) => Math.round(tick / gridTicks);
     const end = playedTicks(lane, cycleIndex);
@@ -191,7 +192,7 @@ export function createEngine() {
       if (started && carry.some(same)) ends.push(Infinity);
       return ends.length ? Math.min(...ends) : -Infinity;
     };
-    for (const { slot, notes } of replacing)
+    for (const { slot, notes } of replacing.slots)
       for (const [voice, pitch, velocity] of notes)
         if (velocity === 0 && newEnd(voice, pitch, slot) < slot) sentOffs.push({ slot, voice, pitch, tie: false });
     const slots = new Map<number, Slot["notes"]>();
@@ -201,6 +202,8 @@ export function createEngine() {
     for (const off of sentOffs.filter(retriggers)) add(off.slot, [off.voice, off.pitch, 0]);
     for (const e of ons) if (!skippedOns.has(e)) add(slotOf(e.onset), [e.voice, e.pitch, e.velocity]);
     for (const off of sentOffs.filter((off) => !retriggers(off))) add(off.slot, [off.voice, off.pitch, 0]);
+    const same = (a: Carry) => (b: Carry) => a.voice === b.voice && a.pitch === b.pitch;
+    for (const old of replacing.carry) if (!carry.some(same(old))) carry.push({ ...old, tie: false });
     return { slots: [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes })), carry };
   }
 

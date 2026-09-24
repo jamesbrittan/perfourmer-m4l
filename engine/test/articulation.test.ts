@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEngine, type LaneParams } from "../src/index";
+import { createEngine, type CycleTable, type LaneParams } from "../src/index";
 
 function cycle(lane: Partial<LaneParams>, cycleIndex = 0, resetBars = 0) {
   const engine = createEngine();
@@ -86,25 +86,32 @@ describe("Player table with ties", () => {
 });
 
 describe("Replacing the playing Cycle mid-way (a Gate change)", () => {
-  const build = (gate: number, replacing?: { slot: number; notes: [number, number, number][] }[]) => {
+  const table = (gate: number, replacing?: CycleTable) => {
     const engine = createEngine();
     engine.configure({ lanes: [{ hits: 3, length: 8, rotate: 0, gateMode: "gap", gate, pitchCycle: [0, 2, 4] }] });
-    return engine.cycleTable(0, 2, 0, [], replacing).slots;
+    return engine.cycleTable(0, 2, 0, [], replacing);
   };
+  const build = (gate: number, replacing?: number) =>
+    table(gate, replacing === undefined ? undefined : table(replacing)).slots;
   const offs = (slots: { slot: number; notes: number[][] }[]) =>
     slots.flatMap((s) => s.notes.filter(([, , v]) => v === 0).map(([, pitch]) => [s.slot, pitch]));
 
   it("keeps the old note-offs of a shortened gate, so a note already sounding still ends", () => {
-    const shorter = build(50, build(100));
+    const shorter = build(50, 100);
     expect(offs(shorter)).toEqual([[90, 60], [180, 60], [270, 64], [360, 64], [420, 67]]);
   });
 
   it("keeps old note-offs when a legato gate is shortened", () => {
-    const shorter = build(80, build(100));
+    const shorter = build(80, 100);
     expect(offs(shorter)).toEqual([[144, 60], [180, 60], [324, 64], [360, 64], [456, 67]]);
   });
 
   it("doesn't cut a lengthened note at its old, earlier end", () => {
-    expect(build(100, build(50))).toEqual(build(100));
+    expect(build(100, 50)).toEqual(build(100));
+  });
+
+  it("still ends a note whose old note-off was carried into the next Cycle", () => {
+    expect(table(50, table(100)).carry).toEqual([{ slot: 0, voice: 1, pitch: 67, tie: false }]);
+    expect(table(100, table(50)).carry).toEqual([{ slot: 0, voice: 1, pitch: 67, tie: true }]);
   });
 });
