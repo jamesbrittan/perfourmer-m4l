@@ -92,6 +92,9 @@ class Patch:
 
 LANES = 4
 LANE_DEFAULTS = [(5, 8, 0), (3, 8, 0), (2, 5, 0), (7, 12, 0)]  # must match params in pf4-hub.js
+PITCH_DEFAULTS = [([0, 4, 2, 5], 0), ([0, 2, 4], -1), ([0, -3], -2), ([4, 6, 7, 9, 11], 0)]  # (Pitch Cycle, octave)
+PITCH_STEPS = 8
+PLAYER_DICT = "pf4.player"  # each Lane's playing bank, read by the adapter (pf4-hub.js)
 RATES = ["1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16Q", "1/16T", "1/16S", "1/32", "1/32Q"]  # = engine RATES
 DEFAULT_RATE = RATES.index("1/16")
 NEVER = 1e12  # "no Reset" period, as in pf4-hub.js
@@ -103,7 +106,7 @@ def build_hub():
     Y = 220  # logic lives below the visible 169px device area
 
     # --- adapter + shared player table
-    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=6)
+    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=7)
     table = P.obj("coll", 4, Y + 40, ins=1, outs=4)
     shared_notes = P.obj("zl iter 3", 4, Y + 80, ins=2, outs=2)
     pending = P.obj("route 0 1 2 3", 200, Y + 40, ins=2, outs=5)
@@ -123,6 +126,9 @@ def build_hub():
     P.c(reset, reset_msg); P.c(reset_msg, adapter)
     P.comment("Perfourmer setup: Play Mode M1 · synth ch 1–4 on MIDI ch 1–4 · "
               "Edit 3 (aftertouch → cutoff) on", 380, 76, 190)
+    scale_readout = P.add("comment", 380, 140, w=190, h=18, text="Scale: –", ins=1, outs=0)
+    P.c(adapter, scale_readout, 6)
+    player_state = P.obj(f"dict {PLAYER_DICT}", 1500, Y, ins=2, outs=4)
 
     # --- Live API (via the adapter): transport running/stopped and time signature
     here = P.obj("live.thisdevice", 1000, Y, ins=1, outs=3)
@@ -151,8 +157,13 @@ def build_hub():
     clock = P.obj(f"metro {GRID_TICKS} ticks @quantize {GRID_TICKS} ticks @active 1", 600, Y, ins=2)
     pos = P.obj("transport", 600, Y + 30, ins=2, outs=9)
     tick = P.obj("expr int($f1+0.5)", 600, Y + 60)
+    clock_t = P.obj("t i i i", 600, Y + 75, ins=1, outs=3)
     fan = P.obj("t " + " ".join(["i"] * LANES), 600, Y + 90, ins=1, outs=LANES)
-    P.c(clock, pos); P.c(pos, tick, 7); P.c(tick, fan)
+    # a Cycle wrap only counts when the song position moved on by a grid step or so; a jump (start, locate) doesn't
+    delta = P.obj("- 0", 700, Y + 90, ins=2)
+    contiguous = P.obj("expr ($i1 > 0) && ($i1 <= 16)", 700, Y + 110)
+    P.c(clock, pos); P.c(pos, tick, 7); P.c(tick, clock_t)
+    P.c(clock_t, delta, 2, 0); P.c(delta, contiguous); P.c(clock_t, delta, 1, 1); P.c(clock_t, fan, 0)
 
     for n in range(LANES):
         hits_d, len_d, rot_d = LANE_DEFAULTS[n]
@@ -165,7 +176,33 @@ def build_hub():
         readout = P.add("comment", x, 132, w=92, h=30, text="Cycle – · step –", ins=1, outs=0)
         P.c(readouts, readout, n)
 
+        # Pitch Cycle editor: one row per Lane — length, 8 degrees (steps past the length greyed out), transpose
+        degrees, octave = PITCH_DEFAULTS[n]
+        py = 22 + 34 * n
+        P.comment(f"L{n + 1}", 580, py, 22)
+        plen = P.param("live.numbox", f"L{n + 1} Pitch Length", 602, py, 1, PITCH_STEPS, len(degrees),
+                       w=28, h=18, short="Len")
+        steps = [P.param("live.numbox", f"L{n + 1} Degree {i + 1}", 636 + 26 * i, py, -14, 14,
+                         degrees[i] if i < len(degrees) else 0, w=24, h=18, short=f"Deg {i + 1}")
+                 for i in range(PITCH_STEPS)]
+        trans = P.param("live.numbox", f"L{n + 1} Transpose", 850, py, -7, 7, 0, w=30, h=18, short="Trans")
+        octv = P.param("live.numbox", f"L{n + 1} Octave", 884, py, -3, 3, octave, w=30, h=18, short="Oct")
         lx = 200 + 300 * n  # this Lane's logic column
+        py_l = Y + 700  # this Lane's pitch logic
+        initial = " ".join(str(degrees[i] if i < len(degrees) else 0) for i in range(PITCH_STEPS))
+        pitch = P.obj(f"pak {len(degrees)} {initial}", lx, py_l, ins=9)
+        to_pitch = P.obj(f"prepend pitch {n}", lx, py_l + 30)
+        P.c(plen, pitch, 0, 0); P.c(pitch, to_pitch); P.c(to_pitch, adapter)
+        for i, step in enumerate(steps):
+            P.c(step, pitch, 0, i + 1)
+            if i:  # steps beyond the Pitch Length are inactive
+                used = P.obj(f"expr $i1 > {i}", lx + 40 * (i % 4), py_l + 60 + 20 * (i // 4))
+                active = P.obj("prepend active", lx + 40 * (i % 4), py_l + 110 + 20 * (i // 4))
+                P.c(plen, used); P.c(used, active); P.c(active, step)
+        shift = P.obj(f"pak 0 {octave}", lx + 150, py_l, ins=2)
+        to_shift = P.obj(f"prepend transpose {n}", lx + 150, py_l + 30)
+        P.c(trans, shift, 0, 0); P.c(octv, shift, 0, 1); P.c(shift, to_shift); P.c(to_shift, adapter)
+
         ly = Y + 100
         # Hits range follows Length, so a full encoder sweep is always valid
         len_t = P.obj("t i i", lx, ly, ins=1, outs=2)
@@ -189,16 +226,16 @@ def build_hub():
 
         # player: position = (song mod Reset period) mod Cycle length, exactly as the engine's locate()
         where = "fmod(fmod($f1,$f3),$f2)"
-        tick_t = P.obj("t i i", lx, ly + 200, ins=1, outs=2)
+        tick_t = P.obj("t i i i", lx, ly + 200, ins=1, outs=3)
         pos_now = P.obj(f"expr {where}", lx + 60, ly + 230, ins=3)
         pos_t = P.obj("t f f", lx + 60, ly + 260, ins=1, outs=2)
-        wrapped = P.obj("expr $f1 < $f2", lx + 60, ly + 290, ins=2)   # position went backwards = new Cycle
+        wrapped = P.obj("expr ($f1 < $f2) && $i3", lx + 60, ly + 290, ins=3)  # position went backwards = new Cycle
         is_new = P.obj("sel 1", lx + 60, ly + 320, ins=2, outs=2)
         key = P.obj(f"expr $i4*{BANK_SIZE} + int({where}/{GRID_TICKS}. + 0.5)", lx, ly + 460, ins=4)
         P.c(fan, tick_t, LANES - 1 - n)
         P.c(tick_t, pos_now, 1, 0)                       # first: adopt a pending bank if a Cycle began
         P.c(pos_now, pos_t); P.c(pos_t, wrapped, 1, 0); P.c(pos_t, wrapped, 0, 1)
-        P.c(wrapped, is_new)
+        P.c(wrapped, is_new); P.c(contiguous, wrapped, 0, 2)
         P.c(tick_t, key, 0, 0)                           # then: look up this slot in the playing bank
         P.c(key, table)
         init_c = P.msg(str(len_d * 120), lx + 150, ly + 200)
@@ -211,21 +248,27 @@ def build_hub():
 
         adopt_now = P.obj("t b", lx + 60, ly + 350)
         has_pending = P.obj("sel -1", lx + 60, ly + 380, ins=2, outs=2)
-        adopt_t = P.obj("t b i i b", lx + 60, ly + 410, ins=1, outs=4)
+        # adopting (right to left): new Cycle length, new bank for lookups and in the player dict, clear pending,
+        # then tell the adapter "adopt <lane> <bank> <songTicks>" (it may offer the next bank straight away, so
+        # pending must already be clear), then release the Voice's held notes
+        adopt_t = P.obj("t b i i i b", lx + 60, ly + 410, ins=1, outs=5)
         bank_key = P.obj(f"+ {n * 2}", lx + 110, ly + 440, ins=2)
-        to_adapter = P.obj(f"prepend adopt {n}", lx + 160, ly + 440)
+        noted = P.obj(f"prepend replace lane{n}", lx + 200, ly + 440)
+        at_tick = P.obj("pack 0 0", lx + 160, ly + 470, ins=2)
+        to_adapter = P.obj(f"prepend adopt {n}", lx + 160, ly + 500)
         release = P.msg(f"release {n + 1}", lx + 60, ly + 470)  # 4×mono: Lane n+1 plays Voice n+1
-        clear_pending = P.msg("-1", lx + 140, ly + 470)
+        clear_pending = P.msg("-1", lx + 110, ly + 500)
         P.c(is_new, adopt_now); P.c(when_stopped, adopt_now); P.c(adopt_now, pend_bank); P.c(pend_bank, has_pending)
         P.c(has_pending, adopt_t, 1)
-        P.c(adopt_t, pend_ticks, 3); P.c(pend_ticks, pos_now, 0, 1); P.c(pend_ticks, key, 0, 1)
-        P.c(adopt_t, bank_key, 2); P.c(bank_key, key, 0, 3)
-        P.c(adopt_t, to_adapter, 1); P.c(to_adapter, adapter)
+        P.c(adopt_t, pend_ticks, 4); P.c(pend_ticks, pos_now, 0, 1); P.c(pend_ticks, key, 0, 1)
+        P.c(adopt_t, bank_key, 3); P.c(bank_key, key, 0, 3); P.c(adopt_t, noted, 3); P.c(noted, player_state)
+        P.c(adopt_t, clear_pending, 2); P.c(clear_pending, pend_bank, 0, 1)
+        P.c(tick_t, at_tick, 2, 1)                       # the song tick of this adoption
+        P.c(adopt_t, at_tick, 1, 0); P.c(at_tick, to_adapter); P.c(to_adapter, adapter)
         P.c(adopt_t, release, 0); P.c(release, bus)
-        P.c(adopt_t, clear_pending, 0); P.c(clear_pending, pend_bank, 0, 1)
         P.c(started, adopt_now, 1)  # transport start adopts whatever is pending
 
-    P.save_amxd("PF4 Hub.amxd", 580)
+    P.save_amxd("PF4 Hub.amxd", 920)
 
 
 def build_voice():

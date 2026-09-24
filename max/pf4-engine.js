@@ -39,7 +39,8 @@ var RATE_TICKS = {
   "1/32Q": 48
 };
 var RATES = Object.keys(RATE_TICKS);
-var PITCH = 60;
+var MIDDLE_C = 60;
+var C_MAJOR = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
 var GATE = 0.5;
 var VELOCITY = 100;
 function bjorklund(hits, length) {
@@ -55,22 +56,34 @@ function bjorklund(hits, length) {
   } while (remainder.length > 1);
   return groups.concat(remainder).flat();
 }
+var clampToMidi = (note) => Math.max(0, Math.min(127, note));
+function degreeToNote(degree, { root, intervals }) {
+  const octave = Math.floor(degree / intervals.length);
+  const index = degree - octave * intervals.length;
+  return MIDDLE_C + root + intervals[index] + 12 * octave;
+}
 function allocate(lane, notes) {
   return notes.map((note) => ({ ...note, voice: lane + 1 }));
 }
 function createEngine() {
   let lanes = [];
+  let scale = C_MAJOR;
   let resetTicks = 0;
   const voiceDevices = /* @__PURE__ */ new Map();
-  function renderCycle(lane, _cycleIndex) {
-    const { hits, length, rotate } = lanes[lane];
+  function renderCycle(lane, cycleIndex) {
+    const { hits, length, rotate, pitchCycle = [0], transpose = 0, octave = 0 } = lanes[lane];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
     const rotated = pattern.map((_, step2) => pattern[(step2 - shift + length) % length]);
     const step = stepTicks(lane);
-    const notes = rotated.flatMap(
-      (hit, i) => hit ? [{ onset: i * step, duration: step * GATE, pitch: PITCH, velocity: VELOCITY }] : []
-    );
+    const onsets = rotated.flatMap((hit, i) => hit ? [i * step] : []);
+    const hitsBefore = cyclesSinceReset(lane, cycleIndex) * onsets.length;
+    const notes = onsets.map((onset, hit) => ({
+      onset,
+      duration: step * GATE,
+      pitch: clampToMidi(degreeToNote(pitchCycle[(hitsBefore + hit) % pitchCycle.length] + transpose, scale) + 12 * octave),
+      velocity: VELOCITY
+    }));
     return allocate(lane, notes);
   }
   function stepTicks(lane) {
@@ -79,23 +92,28 @@ function createEngine() {
   function cycleTicks(lane) {
     return lanes[lane].length * stepTicks(lane);
   }
+  function cyclesPerPeriod(lane) {
+    return resetTicks ? Math.ceil(resetTicks / cycleTicks(lane)) : Infinity;
+  }
+  function cyclesSinceReset(lane, cycleIndex) {
+    return cycleIndex % cyclesPerPeriod(lane);
+  }
   function locate(lane, songTicks) {
     const cycle = cycleTicks(lane);
     const period = resetTicks ? Math.floor(songTicks / resetTicks) : 0;
     const sinceReset = resetTicks ? songTicks % resetTicks : songTicks;
-    const cyclesPerPeriod = resetTicks ? Math.ceil(resetTicks / cycle) : 0;
     return {
-      cycleIndex: period * cyclesPerPeriod + Math.floor(sinceReset / cycle),
+      cycleIndex: (period ? period * cyclesPerPeriod(lane) : 0) + Math.floor(sinceReset / cycle),
       offsetTicks: sinceReset % cycle
     };
   }
-  function slotTable(lane, gridTicks) {
+  function slotTable(lane, gridTicks, cycleIndex = 0) {
     const slots = /* @__PURE__ */ new Map();
     const at = (tick, note) => {
       const slot = Math.round(tick / gridTicks);
       slots.set(slot, [...slots.get(slot) ?? [], note]);
     };
-    for (const e of renderCycle(lane, 0)) {
+    for (const e of renderCycle(lane, cycleIndex)) {
       at(e.onset, [e.voice, e.pitch, e.velocity]);
       at(e.onset + e.duration, [e.voice, e.pitch, 0]);
     }
@@ -104,6 +122,7 @@ function createEngine() {
   return {
     configure(config) {
       lanes = config.lanes;
+      scale = config.scale ?? C_MAJOR;
       resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
     },
     cycleTicks,
