@@ -1,0 +1,17 @@
+{
+  "name": "pf4-engine",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Perfourmer sequencer pattern engine (Max-free; bundled for Max v8)",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2020 --outfile=../max/pf4-engine.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}
