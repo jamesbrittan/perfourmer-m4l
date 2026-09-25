@@ -4,12 +4,99 @@ Run: python3 max/build_devices.py   (after `npm run build` in engine/, which wri
 The devices are generated, not hand-patched: edit this file and rebuild. Scripts (pf4-hub.js with the engine
 inlined, pf4-voice.js) are embedded in v8.codebox objects, so the .amxd files need nothing beside them.
 """
-import json, os, struct
+import json, os, re, struct
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GRID_TICKS = 2  # player resolution; must match GRID_TICKS in pf4-hub.js
 BANK_SIZE = 10000  # must match BANK_SIZE in pf4-hub.js
 VOICE_BUS = "pf4.voice"
+
+
+# Live's Info View help: (title, text) per control kind. Parameters match by name without their "L<n> " Lane prefix;
+# readouts match by the text they start with (see info_for). One table for every control, so later ones pick it up.
+HELP = {
+    "Hits": ("Hits", "How many of the Lane's steps play, spread as evenly as possible (a Euclidean rhythm). "
+             "Can't exceed Length. Takes effect from the Lane's next Cycle."),
+    "Length": ("Length", "How many steps the Lane's Cycle has (1–64). The rhythm repeats every Cycle. "
+               "Takes effect from the next Cycle."),
+    "Rotate": ("Rotate", "Shifts the hits later by this many steps. Takes effect from the next Cycle."),
+    "Rate": ("Rate", "How long each step lasts: 1/1 to 1/32, with triplets (T), quintuplets (Q) and septuplets (S). "
+             "Takes effect from the next Cycle."),
+    "Rhythm": ("Rhythm Preset", "Loads a known Euclidean rhythm (Toussaint): sets Hits, Length and Rotate, making it "
+               "the Lane's Base. Shows — again once you change those by hand."),
+    "Pitch Length": ("Pitch Cycle notes", "How many of the 8 degree boxes the Pitch Cycle uses. Each hit takes the "
+                     "next degree, so when this differs from Hits the melody drifts against the rhythm."),
+    "Degree": ("Pitch Cycle degree", "Scale degree for this step of the Pitch Cycle: 0 = the Scale's root nearest "
+               "middle C, 7 = an octave up in a 7-note scale, negative = below. Greyed out past the Pitch Cycle "
+               "length."),
+    "Transpose": ("Transpose", "Moves the Lane along the Scale by scale degrees. Takes effect from the next Cycle."),
+    "Octave": ("Octave", "Moves the Lane up or down by octaves. Takes effect from the next Cycle."),
+    "Gate Mode": ("Gate Mode", "Step: each note lasts Gate % of one step. Gap: Gate % of the gap to the next hit, so "
+                  "sparse patterns get long notes; Gap at 100% ties the notes legato."),
+    "Gate": ("Gate %", "Note length as a percentage of a step or of the gap to the next hit (see Gate Mode). Heard "
+             "from the next note."),
+    "Velocity": ("Velocity", "Velocity of every note (1–127). Heard from the next note."),
+    "Accent": ("Accent", "Velocity added to the first hit of each Cycle; 0 = no accent. Heard from the next note."),
+    "Probability": ("Probability", "Chance (%) that each hit sounds, decided per Cycle from the Seed, so the same bars "
+                    "replay the same way. Takes effect from the next Cycle."),
+    "Mutation": ("Mutation", "Chance each Cycle that each step and each pitch is redrawn from the Base: 0 = the Base "
+                 "forever, 127 = a new pattern every Cycle. Seeded by song position, so a section replays the same "
+                 "evolution."),
+    "Seed": ("Seed", "Chooses which evolution Mutation and Probability follow. Saved with the set, not automatable."),
+    "Capture": ("Capture", "Makes the Cycle playing now the Lane's Base, so Mutation 0 repeats it and Mutation "
+                "departs from it. Revert undoes it."),
+    "Revert": ("Revert", "Goes back to the Base from before the last Capture."),
+    "AT Depth": ("Aftertouch LFO depth", "How far the Lane's aftertouch LFO sweeps (the Perfourmer's VCF cutoff, with "
+                 "Edit 3 on). 0 = no aftertouch sent."),
+    "AT Rate": ("Aftertouch LFO rate", "Length of one aftertouch sweep, in bars of four beats. Follows song position, "
+                "so it replays the same way."),
+    "CC1 Depth": ("CC1 LFO depth", "How far the Lane's CC1 LFO sweeps (the Perfourmer's pulse width). 0 = no CC1 "
+                  "sent."),
+    "CC1 Rate": ("CC1 LFO rate", "Length of one CC1 sweep, in bars of four beats. Follows song position."),
+    "Group Mode": ("Group Mode", "How the Lane uses a group of Voices (see Voices): poly plays chords, round-robin "
+                   "moves successive hits across the Voices 1 → 4, unison plays every Voice together. Takes effect "
+                   "from the next Cycle."),
+    "Chord Shape": ("Chord Shape", "For poly: scale-degree intervals stacked on each hit, lowest note on the "
+                    "highest-numbered Voice (the bottom of the Perfourmer's panel). Takes effect from the next Cycle."),
+    "Reset Bars": ("Reset", "Realigns every Lane (rhythm and Pitch Cycle) to its start every N bars of Live's time "
+                   "signature. 0 = never. Cycles keep counting across Resets, so Mutation keeps evolving."),
+    "Split": ("Voices (Split)", "How the four Voices are grouped: 1+1+1+1 (one per Lane), 4, 1+3, 2+2 or 1+1+2. Lanes "
+              "take the groups in order; a Lane without one runs silently. While playing, a change lands on the next "
+              "bar."),
+    "Voice": ("Voice", "This chain's Voice number (1–8), set from its position in the rack. Notes for this Voice go "
+              "out on the MIDI channel with the same number; set the chain's External Instrument to match."),
+    # readouts
+    "readout:Cycle": ("Lane position", "Which Cycle the Lane is in and which step, from song position. 'mutated' "
+                      "means Mutation or Probability has changed this Cycle from the Base."),
+    "readout:Scale": ("Scale", "Live's current Scale, which every Lane follows. Change it in Live's control bar or "
+                      "on Push."),
+    "readout:Waiting": ("Voices found", "The Voice devices found in the rack after the Hub, and any missing or "
+                        "duplicated Voice numbers."),
+    "readout:pattern": ("Pattern", "The Lane's current Cycle as it plays: ● hit, · rest, ◉/○ the playhead."),
+    "readout:voices": ("Lane Voices", "Which Voices this Lane drives, and how (see Voices and Group Mode)."),
+    "readout:setup": ("Perfourmer setup", "Set the Perfourmer once: Play Mode M1, synth channels 1–4 on MIDI "
+                      "channels 1–4, and Edit 3 (aftertouch → cutoff) on. The Hub does all voice allocation."),
+}
+
+
+def info_for(box):
+    """The Info View help for a box: parameters by name, readouts by the text they start with."""
+    name = box.get("saved_attribute_attributes", {}).get("valueof", {}).get("parameter_longname")
+    if name:
+        kind = re.sub(r"^L\d+ ", "", name)
+        return HELP.get(kind) or HELP.get(re.sub(r" \d+$", "", kind))
+    text = box.get("text", "")
+    if box["maxclass"] not in ("comment", "message"):
+        return None
+    for start, key in (("Cycle ", "readout:Cycle"), ("Scale:", "readout:Scale"), ("Waiting for Voices", "readout:Waiting"),
+                       ("Perfourmer setup", "readout:setup")):
+        if text.startswith(start):
+            return HELP[key]
+    if text and set(text) <= set("·●◉○"):
+        return HELP["readout:pattern"]
+    if re.fullmatch(r"V\d+", text):
+        return HELP["readout:voices"]
+    return None
 
 
 def embedded(script, inline_engine=False):
@@ -70,6 +157,10 @@ class Patch:
         self.lines.append({"patchline": {"source": [a, outlet], "destination": [b, inlet]}})
 
     def save_amxd(self, name, width):
+        for entry in self.boxes:
+            info = info_for(entry["box"])
+            if info:
+                entry["box"]["annotation_name"], entry["box"]["annotation"] = info
         doc = {"patcher": {
             "fileversion": 1,
             "appversion": {"major": 9, "minor": 1, "revision": 5, "architecture": "x64", "modernui": 1},
