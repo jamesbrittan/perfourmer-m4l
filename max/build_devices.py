@@ -357,9 +357,8 @@ def build_hub():
                            parameter_enable=1, saved_attribute_attributes={"valueof": {
                                "parameter_longname": f"L{n + 1} {label}", "parameter_shortname": label,
                                "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
-            pressed = P.obj("sel 1", lx + 230 + 50 * (bx == 1244), Y + 850, ins=2, outs=2)
             action = P.msg(f"{label.lower()} {n}", lx + 230 + 50 * (bx == 1244), Y + 880)
-            P.c(button, pressed); P.c(pressed, action); P.c(action, adapter)
+            P.c(button, action); P.c(action, adapter)  # a live.text button sends a bang, not 1
         py_l = Y + 700  # this Lane's pitch logic
         initial = " ".join(str(degrees[i] if i < len(degrees) else 0) for i in range(PITCH_STEPS))
         pitch = P.obj(f"pak {len(degrees)} {initial}", lx, py_l, ins=9)
