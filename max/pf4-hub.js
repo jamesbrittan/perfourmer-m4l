@@ -154,7 +154,7 @@ function split(index) {
   if (at - polledAt < 240) at += bar;
   // if an earlier change hasn't happened yet, the Split in effect is still its previous one
   const inEffect = playing && polledAt < song.splitAt ? song.previousSplit : song.split;
-  Object.assign(song, { previousSplit: inEffect, split: next, splitAt: playing ? at : 0 });
+  Object.assign(song, { previousSplit: playing ? inEffect : next, split: next, splitAt: playing ? at : 0 });
   engine.configure({ lanes: params, ...song });
   for (let n = 0; n < LANES; n++) {
     if (playing) render(n, null, true); // the playing Cycle may already reach past the bar
