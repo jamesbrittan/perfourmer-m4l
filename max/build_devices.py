@@ -269,6 +269,17 @@ def lanes_route():
 HUB_BUS = "pf4.hub"
 
 
+def steppers(P, target, minus, plus, lx, ly, tab):
+    """− and + buttons (each placed at an (x, y, w, h) rect) that step a live.dial or live.numbox by one; the control
+    keeps the value inside its range. Not parameters: they only move the control, which is the parameter."""
+    for k, (label, op, (x, y, w, h)) in enumerate((("−", "- 1", minus), ("+", "+ 1", plus))):
+        button = P.add("live.text", x, y, w=w, h=h, ins=1, outs=2, text=label, texton=label, mode=0, fontsize=8.0,
+                       parameter_enable=0, tab=tab)
+        current = P.obj("i", lx + 40 * k, ly, ins=2)  # the control's value, sent on by the button's bang
+        step = P.obj(op, lx + 40 * k, ly + 25, ins=2)
+        P.c(target, current, 0, 1); P.c(button, current); P.c(current, step); P.c(step, target)
+
+
 def build_hub():
     P = Patch()
     Y = 220  # logic lives below the visible 169px device area
@@ -379,8 +390,8 @@ def build_hub():
     # Tab 1 (Pitch) headers
     P.comment("Len", 306, 26, 24, tab=1)
     P.comment("Pitch Cycle (scale degrees)", 336, 26, 175, tab=1)
-    P.comment("Trans", 525, 26, 32, tab=1)
-    P.comment("Oct", 560, 26, 30, tab=1)
+    P.comment("Trans", 525, 26, 48, tab=1)
+    P.comment("Oct", 588, 26, 48, tab=1)
 
     # Tab 2 (Feel) headers
     P.comment("Gate %", 325, 32, 48, tab=2)
@@ -431,16 +442,19 @@ def build_hub():
         # --- Tab 0: Rhythm (4 columns side-by-side, 90px each)
         rx = 285 + 90 * n
         P.comment(f"Lane {n + 1}", rx, 26, 60, tab=0)
-        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, *R["hits"], hits_d, short="Hits", tab=0,
+        # dials 40 tall, each with − / + steppers (11 tall) beneath, except Rate
+        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, *R["hits"], hits_d, h=40, short="Hits", tab=0,
                        varname=name("hits", n + 1))
-        length = P.param("live.dial", f"L{n + 1} Length", rx + 44, 42, *R["length"], len_d, short="Length", tab=0,
-                         varname=name("length", n + 1))
-        rotate = P.param("live.dial", f"L{n + 1} Rotate", rx, 92, *R["rotate"], rot_d, short="Rotate", tab=0,
+        length = P.param("live.dial", f"L{n + 1} Length", rx + 44, 42, *R["length"], len_d, h=40, short="Length",
+                         tab=0, varname=name("length", n + 1))
+        rotate = P.param("live.dial", f"L{n + 1} Rotate", rx, 96, *R["rotate"], rot_d, h=40, short="Rotate", tab=0,
                          varname=name("rotate", n + 1))
-        rate = P.param("live.dial", f"L{n + 1} Rate", rx + 44, 92, 0, 0, rate_d, short="Rate", enum=RATES, tab=0,
-                       varname=name("rate", n + 1))
-        menu = P.param("live.menu", f"L{n + 1} Rhythm", rx, 142, 0, 0, 0, w=88, h=16, short="Rhythm", enum=presets, tab=0,
-                       varname=name("rhythm", n + 1))
+        rate = P.param("live.dial", f"L{n + 1} Rate", rx + 44, 96, 0, 0, rate_d, h=40, short="Rate", enum=RATES,
+                       tab=0, varname=name("rate", n + 1))
+        for k, (dial, sx, sy) in enumerate(((hits, rx, 83), (length, rx + 44, 83), (rotate, rx, 137))):
+            steppers(P, dial, (sx + 2, sy, 19, 11), (sx + 23, sy, 19, 11), lx + 90 * k, Y + 1000, tab=0)
+        menu = P.param("live.menu", f"L{n + 1} Rhythm", rx, 151, 0, 0, 0, w=88, h=16, short="Rhythm", enum=presets,
+                       tab=0, varname=name("rhythm", n + 1))
         to_rhythm = P.obj(f"prepend rhythm {n}", lx, Y + 910)
         P.c(menu, to_rhythm); P.c(to_rhythm, adapter); P.c(preset_menus, menu, n)
         dials = P.obj("unpack 0 0 0", lx, Y + 940, ins=1, outs=3)
@@ -455,8 +469,12 @@ def build_hub():
         steps = [P.param("live.numbox", f"L{n + 1} Degree {i + 1}", 336 + 23 * i, ty, *R["degree"],
                          degrees[i] if i < len(degrees) else 0, w=22, h=18, short=f"Deg {i + 1}", tab=1)
                  for i in range(PITCH_STEPS)]
-        trans = P.param("live.numbox", f"L{n + 1} Transpose", 525, ty, *R["transpose"], d["transpose"], w=32, h=18, short="Trans", tab=1)
-        octv = P.param("live.numbox", f"L{n + 1} Octave", 560, ty, *R["octave"], octave, w=32, h=18, short="Oct", tab=1)
+        # Transpose and Octave with a − / + stepper either side: [−][value][+]
+        trans = P.param("live.numbox", f"L{n + 1} Transpose", 537, ty, *R["transpose"], d["transpose"], w=24, h=18,
+                        short="Trans", tab=1)
+        octv = P.param("live.numbox", f"L{n + 1} Octave", 600, ty, *R["octave"], octave, w=24, h=18, short="Oct", tab=1)
+        for k, (box, bx) in enumerate(((trans, 537), (octv, 600))):
+            steppers(P, box, (bx - 12, ty, 11, 18), (bx + 25, ty, 11, 18), lx + 90 * (k + 3), Y + 1000, tab=1)
         py_l = Y + 700
         initial = " ".join(str(degrees[i] if i < len(degrees) else 0) for i in range(PITCH_STEPS))
         pitch = P.obj(f"pak {len(degrees)} {initial}", lx, py_l, ins=9)
