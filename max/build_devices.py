@@ -287,7 +287,11 @@ def build_hub():
         clear_pending = P.msg("-1", lx + 110, ly + 500)
         clear_now = P.msg("0", lx + 140, ly + 500)
         releasing = P.obj("sel 1", lx + 20, ly + 440, ins=2, outs=2)
-        P.c(is_new, adopt_now); P.c(when_stopped, adopt_now); P.c(adopt_now, pend_bank); P.c(pend_bank, has_pending)
+        # Taking a bank up at once (the stopped path) also releases the Voice: v8 learns the transport started a
+        # moment late, so this can happen just after playback begins; ending the sounding note here keeps it from
+        # hanging when the new bank's note-off is for a different pitch
+        at_once = P.obj("t b b", lx + 120, ly + 330, ins=1, outs=2)
+        P.c(is_new, adopt_now); P.c(when_stopped, at_once); P.c(at_once, adopt_now, 1); P.c(at_once, release, 0); P.c(adopt_now, pend_bank); P.c(pend_bank, has_pending)
         P.c(has_pending, adopt_t, 1)
         P.c(has_pending, release, 0)  # a Cycle boundary with nothing pending (v8 fell behind): release, don't hang
         P.c(take_now, adopt_now)
@@ -302,7 +306,8 @@ def build_hub():
         P.c(tick_t, at_tick, 3, 1)                       # the song tick of this adoption
         P.c(adopt_t, at_tick, 0, 0); P.c(at_tick, to_adapter); P.c(to_adapter, adapter)
         P.c(release, bus)
-        P.c(started, adopt_now, 1)  # transport start adopts whatever is pending
+        # (no adoption on transport start: the playing bank already holds the Cycle at the song position, and a
+        # bank still pending from before the stop would swap tables under a sounding note)
 
     P.save_amxd("PF4 Hub.amxd", 1080)
 

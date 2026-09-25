@@ -125,8 +125,15 @@ function setScale(scale, change) {
 
 function transportRunning(isPlaying) {
   playing = Boolean(isPlaying);
-  outlet(5, playing ? 1 : 0); // the player adopts pending banks on start (and replies "adopt" straight away)
-  if (!playing) return;
+  outlet(5, playing ? 1 : 0);
+  if (!playing) {
+    // withdraw anything offered for the next Cycle: stopped, the playing bank is kept on the song position instead
+    for (let n = 0; n < LANES; n++) {
+      outlet(1, n, -1, 0, 0, 0);
+      offered[n] = -1;
+    }
+    return;
+  }
   for (let n = 0; n < LANES; n++) {
     adoptedAt[n] = null;
     prepareNext(n, playingCycle(n));
