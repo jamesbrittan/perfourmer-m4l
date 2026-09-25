@@ -214,6 +214,8 @@ LANE_DEFAULTS = [(5, 8, 0), (3, 8, 0), (2, 5, 0), (7, 12, 0)]  # must match para
 PITCH_DEFAULTS = [([0, 4, 2, 5], 0), ([0, 2, 4], -1), ([0, -3], -2), ([4, 6, 7, 9, 11], 0)]  # (Pitch Cycle, octave)
 PITCH_STEPS = 8
 ARTICULATION_DEFAULTS = (50, 100, 0)  # Gate %, Velocity, Accent; must match pf4-hub.js
+LFO_DEFAULTS = [(7, 5), (11, 9), (13, 15), (17, 19)]  # per Lane: (AT rate, CC1 rate) in bars; depths default to 0 (off)
+LFO_UPDATE_MS = 40  # LFO sampling; only changed values are sent, so the MIDI port isn't flooded
 EVOLUTION_DEFAULTS = (100, 0)  # Probability %, Mutation; the seed defaults to the Lane number (pf4-hub.js)
 PLAYER_DICT = "pf4.player"  # each Lane's playing bank, read by the adapter (pf4-hub.js)
 RATES = ["1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16Q", "1/16T", "1/16S", "1/32", "1/32Q"]  # = engine RATES
@@ -294,6 +296,11 @@ def build_hub():
     contiguous = P.obj("expr ($i1 > 0) && ($i1 <= 16)", 700, Y + 110)
     P.c(clock, pos); P.c(pos, tick, 7); P.c(tick, clock_t)
     P.c(clock_t, delta, 2, 0); P.c(delta, contiguous); P.c(clock_t, delta, 1, 1); P.c(clock_t, fan, 0)
+    # --- timbre LFO clock: song position a few times a second (the LFOs follow the song, so they replay)
+    lfo_clock = P.obj(f"metro {LFO_UPDATE_MS} @active 1", 1700, Y, ins=2)
+    lfo_pos = P.obj("transport", 1700, Y + 30, ins=2, outs=9)
+    lfo_fan = P.obj("t " + " ".join(["f"] * (2 * LANES)), 1700, Y + 60, ins=1, outs=2 * LANES)
+    P.c(lfo_clock, lfo_pos); P.c(lfo_pos, lfo_fan, 7)
     # a jump in song position skips note-offs: release every Voice (this runs before any Lane's lookups)
     jumped = P.obj("sel 0", 700, Y + 130, ins=2, outs=2)
     P.c(contiguous, jumped); P.c(jumped, release_all)
@@ -326,7 +333,8 @@ def build_hub():
             for label, ax in (("Len", 602), ("Pitch Cycle (scale degrees)", 636), ("Trans", 850), ("Oct", 884)):
                 P.comment(label, ax, 4, 140 if ax == 636 else 34)
             for label, ax in (("Gate %", 972), ("Vel", 1008), ("Accent", 1044),
-                              ("Prob %", 1084), ("Mutate", 1120), ("Seed", 1156), ("Base", 1196)):
+                              ("Prob %", 1084), ("Mutate", 1120), ("Seed", 1156), ("Base", 1196),
+                              ("AT", 1296), ("AT bars", 1332), ("CC1", 1372), ("CC1 bars", 1408)):
                 P.comment(label, ax, 4, 34)
         gate = P.param("live.numbox", f"L{n + 1} Gate", 972, py, 1, 100, gate_d, w=32, h=18, short="Gate %")
         vel = P.param("live.numbox", f"L{n + 1} Velocity", 1008, py, 1, 127, vel_d, w=32, h=18, short="Vel")
@@ -355,6 +363,23 @@ def build_hub():
         for i, box in enumerate((prob, mut, seed)):
             P.c(box, evo, 0, i)
         P.c(evo, to_evo); P.c(to_evo, adapter)
+        # Timbre LFOs: aftertouch (Perfourmer VCF cutoff) and CC1 (pulse width) to this Lane's Voice.
+        # value = depth × (1 − cos(2π · song position / period)) / 2: sweeps 0 … depth; depth 0 sends nothing
+        for k, (kind, label, ax, message) in enumerate((("at", "AT", 1296, "touch"), ("cc1", "CC1", 1372, "cc1"))):
+            depth = P.param("live.numbox", f"L{n + 1} {label} Depth", ax, py, 0, 127, 0, w=32, h=18,
+                            short=f"{label} Dep")
+            bars = P.param("live.numbox", f"L{n + 1} {label} Rate", ax + 36, py, 1, 128, LFO_DEFAULTS[n][k],
+                           w=32, h=18, short=f"{label} Bars")
+            lfo = P.obj("expr int($f2 * (0.5 - 0.5 * cos(6.2831853 * fmod($f1, $f3) / $f3)) + 0.5)",
+                        1700 + 160 * (2 * n + k), Y + 100, ins=3)
+            period = P.obj("* 1920.", 1780 + 160 * (2 * n + k), Y + 70, ins=2)  # bars of four beats
+            init_period = P.msg(str(LFO_DEFAULTS[n][k] * 1920), 1700 + 160 * (2 * n + k), Y + 70)
+            changed = P.obj("change 0", 1700 + 160 * (2 * n + k), Y + 130, ins=2, outs=3)
+            out = P.obj(f"prepend {message} {n + 1}", 1700 + 160 * (2 * n + k), Y + 160)
+            P.c(lfo_fan, lfo, 2 * LANES - 1 - (2 * n + k), 0)
+            P.c(depth, lfo, 0, 1); P.c(bars, period); P.c(period, lfo, 0, 2)
+            P.c(load, init_period); P.c(init_period, lfo, 0, 2)
+            P.c(lfo, changed); P.c(changed, out); P.c(out, bus)
         # Capture / Revert buttons
         for label, bx in (("Capture", 1196), ("Revert", 1244)):
             button = P.add("live.text", bx, py, w=44, h=18, ins=1, outs=2, text=label, texton=label, mode=0,
@@ -464,7 +489,7 @@ def build_hub():
         # (no adoption on transport start: the playing bank already holds the Cycle at the song position, and a
         # bank still pending from before the stop would swap tables under a sounding note)
 
-    P.save_amxd("PF4 Hub.amxd", 1292)
+    P.save_amxd("PF4 Hub.amxd", 1448)
 
 
 def build_voice():
@@ -474,7 +499,7 @@ def build_voice():
     V.comment("= chain number; set this chain's External Instrument to the same MIDI channel", 4, 48, 170)
 
     rcv = V.obj(f"receive {VOICE_BUS}", 4, 200, ins=0)
-    route = V.obj("route release releaseall rollcall", 4, 230, ins=2, outs=4)
+    route = V.obj("route release releaseall rollcall touch cc1", 4, 230, ins=2, outs=6)
     held = V.obj("flush", 4, 440, ins=2, outs=2)  # remembers sounding notes; bang releases them
     # "release <voice>": only when it's addressed to us
     rel_mine = V.obj("expr $i1 == $i2", 250, 260, ins=2)
@@ -493,11 +518,26 @@ def build_voice():
     pk = V.obj("pack 0 0", 4, 470, ins=2)
     fmt = V.obj("midiformat 1", 4, 500, ins=7, outs=2)
     out = V.obj("midiout", 4, 530, ins=1, outs=0)
-    V.c(route, split, 3)
+    V.c(route, split, 5)
     V.c(split, who, 1); V.c(who, mine); V.c(mine, gate, 0, 0)   # right first: is it for this Voice?
     V.c(split, body, 0); V.c(body, gate, 1, 1)                  # then pass [pitch velocity]
     V.c(gate, held); V.c(held, pk, 0, 0); V.c(held, pk, 1, 1); V.c(pk, fmt); V.c(fmt, out)
     # Voice number drives filtering, MIDI channel, release addressing and the Hub announcement
+    # timbre LFOs: "touch <voice> <value>" -> channel aftertouch, "cc1 <voice> <value>" -> CC1, if the voice is ours
+    for k, (outlet_index, fmt_inlet) in enumerate(((3, 4), (4, 2))):
+        t = V.obj("t l l", 600, 260 + 120 * k, ins=1, outs=2)
+        whose = V.obj("zl nth 1", 700, 290 + 120 * k, ins=2, outs=2)
+        is_mine = V.obj("== 1", 700, 320 + 120 * k, ins=2)
+        value = V.obj("zl nth 2", 600, 290 + 120 * k, ins=2, outs=2)
+        g = V.obj("gate 1", 600, 350 + 120 * k, ins=2)
+        V.c(route, t, outlet_index); V.c(t, whose, 1); V.c(whose, is_mine); V.c(is_mine, g, 0, 0)
+        V.c(t, value, 0); V.c(value, g, 0, 1)
+        V.c(voice, is_mine, 0, 1)
+        if fmt_inlet == 2:  # control change: <controller> <value>
+            as_cc = V.obj("prepend 1", 600, 380 + 120 * k)
+            V.c(g, as_cc); V.c(as_cc, fmt, 0, 2)
+        else:
+            V.c(g, fmt, 0, fmt_inlet)
     V.c(voice, mine, 0, 1); V.c(voice, fmt, 0, 6); V.c(voice, rel_mine, 0, 1); V.c(voice, brain)
     here = V.obj("live.thisdevice", 400, 200, ins=1, outs=3)
     V.c(here, brain); V.c(brain, voice)
