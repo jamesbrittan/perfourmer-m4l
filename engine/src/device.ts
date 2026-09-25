@@ -43,6 +43,7 @@ export const LANE_DEFAULTS: LaneParams[] = [
 ].map((lane, n) => ({
   rotate: 0,
   rate: "1/16",
+  feel: "straight",
   transpose: 0,
   octave: 0,
   gate: 50,
@@ -88,6 +89,7 @@ export const CONTROL_NAMES = {
   length: "dial_L{lane}_len",
   rotate: "dial_L{lane}_rot",
   rate: "dial_L{lane}_rate",
+  feel: "menu_L{lane}_feel",
   rhythm: "menu_L{lane}_rhythm",
 } as const;
 
