@@ -168,9 +168,11 @@ export function createScheduler({ engine, lanes, gridTicks, bankSize, playingBan
     captureCycle(n: number) {
       return playing ? soundingCycle(n) : engine.locate(n, polledAt).cycleIndex;
     },
-    /** The song position a change timed to the bar counts from: undefined while stopped (the change is immediate). */
+    /** The song position a change timed to the bar counts from: undefined while stopped (the change is immediate).
+     * The latest position known, from the last poll or the last Cycle boundary a Lane reported, whichever is later:
+     * judged from a stale one, a change made just after an earlier one landed would take it as still to come. */
     changePosition(): number | undefined {
-      return playing ? polledAt : undefined;
+      return playing ? Math.max(polledAt, ...adoptedAt.map((at) => at ?? -Infinity)) : undefined;
     },
   };
 }

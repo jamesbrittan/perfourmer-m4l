@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createEngine, createScheduler } from "../src/index";
 import { between, expected, simulate, type Controls, type SimOptions } from "./player-model";
 
 const BAR = 1920;
@@ -106,6 +107,22 @@ describe("The player, fed by the scheduler", () => {
       expect(captured.length).toBeGreaterThan(0);
       for (const c of [12, 13, 15]) expect(heard(sim, c)).toEqual(captured);
     });
+  });
+});
+
+describe("Timing a change to the bar", () => {
+  it("counts from the latest song position known: the last poll or the last Cycle boundary a Lane reported", () => {
+    const engine = createEngine();
+    engine.configure({ lanes: [{ hits: 1, length: 4, rotate: 0 }] }); // 480-tick Cycles
+    const scheduler = createScheduler({ engine, lanes: 1, gridTicks: 2, bankSize: 10000, playingBank: () => 0, send() {} });
+    expect(scheduler.changePosition()).toBeUndefined(); // stopped: at once
+    scheduler.transport(true);
+    scheduler.poll(1000);
+    expect(scheduler.changePosition()).toBe(1000);
+    scheduler.adopted(0, 1440);
+    expect(scheduler.changePosition()).toBe(1440);
+    scheduler.poll(1500);
+    expect(scheduler.changePosition()).toBe(1500);
   });
 });
 

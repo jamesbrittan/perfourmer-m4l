@@ -3,8 +3,9 @@ import { createEngine, createScheduler, SPLITS, type LaneParams, type Scale, typ
 /**
  * A model of the Hub's native player, driven by the scheduler as the Hub drives it: it plays the two banks per Lane
  * from its table, adopts pending banks at Cycle boundaries (or at the next tick for a "now" offer), and releases a
- * Lane's Voices when told to or when it misses a boundary. Its reports, song position polls and control edits reach
- * the scheduler `latency` ticks late, as they do from Max's low-priority script thread. It plays adversarially: it takes up a pending offer the moment the scheduler starts
+ * Lane's Voices when told to or when it misses a boundary. Its reports and control edits reach the scheduler
+ * `latency` ticks late, as they do from Max's low-priority script thread, and song position polls later still (they
+ * pass through more of the patch). It plays adversarially: it takes up a pending offer the moment the scheduler starts
  * writing to its table, as if its Cycle boundary came part-way through the render.
  */
 
@@ -180,7 +181,7 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
       curTick = tick;
       drain();
       for (const edit of edits) if (edit.at === tick) later(() => edit.fn(controls));
-      if ((tick - start) % pollEvery === 0) later(() => poll(tick));
+      if ((tick - start) % pollEvery === 0) later(() => poll(tick), 2 * latency + 20);
       const contiguous = tick - previous > 0 && tick - previous <= 16;
       previous = tick;
       if (!contiguous) for (let n = 0; n < LANES; n++) release(n, [1, 2, 3, 4, 5, 6, 7, 8]); // the player jumped
