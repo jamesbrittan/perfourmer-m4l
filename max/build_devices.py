@@ -1,15 +1,35 @@
-"""Builds the Max for Live devices ("PF4 Hub.amxd", "PF4 Voice.amxd") next to this file.
+"""Builds the Max for Live devices ("PF4 Hub <n>.amxd", "PF4 Voice <n>.amxd") next to this file.
+
+<n> is the ticket number of the branch being built (feature/08-… → 8, or PF4_TICKET=8), so Live's title bar shows
+which build is loaded; other branches (main) build the plain "PF4 Hub.amxd", "PF4 Voice.amxd".
 
 Run: python3 max/build_devices.py   (after `npm run build` in engine/, which writes pf4-engine.js here)
 The devices are generated, not hand-patched: edit this file and rebuild. Scripts (pf4-hub.js with the engine
 inlined, pf4-voice.js) are embedded in v8.codebox objects, so the .amxd files need nothing beside them.
 """
-import json, os, re, struct
+import glob, json, os, re, struct, subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GRID_TICKS = 2  # player resolution; must match GRID_TICKS in pf4-hub.js
 BANK_SIZE = 10000  # must match BANK_SIZE in pf4-hub.js
 VOICE_BUS = "pf4.voice"
+
+
+def ticket():
+    if os.environ.get("PF4_TICKET"):
+        return int(os.environ["PF4_TICKET"])
+    branch = subprocess.run(["git", "branch", "--show-current"], cwd=HERE, capture_output=True, text=True).stdout
+    m = re.match(r"feature/(\d+)-", branch)
+    return int(m.group(1)) if m else None
+
+
+TICKET = ticket()
+
+
+def device_file(name):
+    """"PF4 Hub.amxd" → "PF4 Hub 8.amxd" on ticket 8's branch."""
+    stem = name[:-len(".amxd")]
+    return f"{stem} {TICKET}.amxd" if TICKET else name
 
 
 # Live's Info View help: (title, text) per control kind. Parameters match by name without their "L<n> " Lane prefix;
@@ -180,7 +200,10 @@ class Patch:
         header = (b"ampf" + struct.pack("<I", 4) + b"mmmm" +
                   b"meta" + struct.pack("<I", 4) + struct.pack("<I", 1) +
                   b"ptch" + struct.pack("<I", len(body)))
-        with open(os.path.join(HERE, name), "wb") as f:
+        stem = name[:-len(".amxd")]
+        for old in glob.glob(os.path.join(HERE, f"{stem}*.amxd")):  # builds for other tickets
+            os.remove(old)
+        with open(os.path.join(HERE, device_file(name)), "wb") as f:
             f.write(header + body)
 
 
@@ -464,4 +487,4 @@ def build_voice():
 if __name__ == "__main__":
     build_hub()
     build_voice()
-    print("built PF4 Hub.amxd, PF4 Voice.amxd")
+    print(f"built {device_file('PF4 Hub.amxd')}, {device_file('PF4 Voice.amxd')}")
