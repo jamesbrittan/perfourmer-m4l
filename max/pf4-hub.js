@@ -12,12 +12,12 @@
 // is playing: it withdraws the pending offer (after which the player can't switch) and reads the dict.
 autowatch = 1;
 inlets = 1;
-outlets = 8; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
+outlets = 9; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
 // switch at the next tick rather than the next Cycle boundary; release 1 = release the Lane's Voice on switching),
 // 2: Voice status text,
 // 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts (lanes 4–7: Base readouts),
 // 5: transport running (1) / stopped (0), 6: "set <text>" Scale readout, 7: Captured Bases as numbers (to the
-// stored-only pattr that saves them with the set)
+// stored-only pattr that saves them with the set), 8: "<lane> set <text>" pattern view
 
 const { createEngine, RATES } = require("pf4-engine.js");
 
@@ -297,6 +297,9 @@ function where(songTicks) {
     outlet(4, n, "set", `Cycle ${cycleIndex + 1} · step ${step}/${params[n].length}${mutated}`);
     const depth = engine.captureDepth(n);
     outlet(4, LANES + n, "set", depth ? `Base: captured${depth > 1 ? ` ×${depth}` : ""}` : "Base: Euclidean");
+    // pattern view: ● hit, · rest; the playhead step shows as ◉ (hit) or ○ (rest)
+    const view = engine.hitSteps(n, cycleIndex).map((hit, i) => (i === step - 1 ? (hit ? "◉" : "○") : hit ? "●" : "·"));
+    outlet(8, n, "set", view.join(""));
   }
 }
 

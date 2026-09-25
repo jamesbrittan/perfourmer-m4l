@@ -229,7 +229,7 @@ def build_hub():
     Y = 220  # logic lives below the visible 169px device area
 
     # --- adapter + shared player table
-    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=8)
+    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=9)
     table = P.obj("coll", 4, Y + 40, ins=1, outs=4)
     shared_notes = P.obj("zl iter 3", 4, Y + 80, ins=2, outs=2)
     pending = P.obj("route 0 1 2 3", 200, Y + 40, ins=2, outs=5)
@@ -261,6 +261,10 @@ def build_hub():
                        "parameter_type": 3, "parameter_invisible": 1}})
     to_bases = P.obj("prepend bases", 1500, Y + 90)
     P.c(adapter, stored, 7); P.c(stored, to_bases); P.c(to_bases, adapter)
+    # pattern view: one row of step glyphs per Lane, with the playhead
+    patterns = P.obj("route 0 1 2 3", 1300, Y + 120, ins=2, outs=5)
+    P.c(adapter, patterns, 8)
+    P.comment("Pattern (current Cycle)", 1452, 4, 200)
 
     # --- Live API (via the adapter): transport running/stopped and time signature
     here = P.obj("live.thisdevice", 1000, Y, ins=1, outs=3)
@@ -380,6 +384,8 @@ def build_hub():
             P.c(depth, lfo, 0, 1); P.c(bars, period); P.c(period, lfo, 0, 2)
             P.c(load, init_period); P.c(init_period, lfo, 0, 2)
             P.c(lfo, changed); P.c(changed, out); P.c(out, bus)
+        view = P.add("comment", 1452, py, w=400, h=18, text="·" * len_d, ins=1, outs=0)
+        P.c(patterns, view, n)
         # Capture / Revert buttons
         for label, bx in (("Capture", 1196), ("Revert", 1244)):
             button = P.add("live.text", bx, py, w=44, h=18, ins=1, outs=2, text=label, texton=label, mode=0,
@@ -489,7 +495,7 @@ def build_hub():
         # (no adoption on transport start: the playing bank already holds the Cycle at the song position, and a
         # bank still pending from before the stop would swap tables under a sounding note)
 
-    P.save_amxd("PF4 Hub.amxd", 1448)
+    P.save_amxd("PF4 Hub.amxd", 1856)
 
 
 def build_voice():

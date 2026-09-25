@@ -302,6 +302,12 @@ export function createEngine() {
     renderCycle,
     cycleTable,
     slotTable,
+    /** Which of the Lane's steps sound in a Cycle (for display). */
+    hitSteps(lane: number, cycleIndex: number): boolean[] {
+      const step = stepTicks(lane);
+      const onsets = new Set(cycleHits(lane, cycleIndex).map((h) => Math.round(h.onset / step)));
+      return Array.from({ length: lanes[lane].length }, (_, i) => onsets.has(i));
+    },
     /** Make the Cycle's sounding pattern the Lane's new Base (the previous one is kept for Revert). */
     capture(lane: number, cycleIndex: number) {
       const { length } = lanes[lane];
