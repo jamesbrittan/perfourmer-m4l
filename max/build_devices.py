@@ -93,9 +93,9 @@ HELP = {
                     "highest-numbered Voice (the bottom of the Perfourmer's panel). Takes effect from the next Cycle."),
     "Reset Bars": ("Reset", "Realigns every Lane (rhythm and Pitch Cycle) to its start every N bars of Live's time "
                    "signature. 0 = never. Cycles keep counting across Resets, so Mutation keeps evolving."),
-    "Split": ("Voices (Split)", "How the four Voices are grouped: 1+1+1+1 (one per Lane), 4, 1+3, 2+2 or 1+1+2. Lanes "
-              "take the groups in order; a Lane without one runs silently. While playing, a change lands on the next "
-              "bar."),
+    "Voicing Matrix": ("Voicing Matrix", "Which Voices the Lane plays. Each Voice belongs to one Lane at most: "
+                       "switching it on here takes it off any other Lane. A Lane with no Voices runs silently. While "
+                       "playing, a change lands on the next bar."),
     "Voice": ("Voice", "This chain's Voice number (1–8), set from its position in the rack. Notes for this Voice go "
               "out on the MIDI channel with the same number; set the chain's External Instrument to match."),
     # readouts
@@ -120,6 +120,8 @@ def info_for(box):
     if name:
         if name in HELP:
             return HELP[name]
+        if re.fullmatch(r"L\d+ Voice \d+", name):
+            return HELP["Voicing Matrix"]
         kind = re.sub(r"^L\d+ ", "", name)
         return HELP.get(kind) or HELP.get(re.sub(r" \d+$", "", kind))
     text = box.get("text", "")

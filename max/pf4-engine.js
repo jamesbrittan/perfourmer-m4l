@@ -29,7 +29,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -123,7 +123,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -260,6 +260,7 @@ var CHORD_SHAPES = {
 };
 var LOWEST_BASS = 24;
 var MIDDLE_C = 60;
+var CHANGE_LEAD = 240;
 var C_MAJOR = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
 function bjorklund(hits, length) {
   hits = Math.max(0, Math.min(hits, length));
@@ -290,12 +291,9 @@ function createEngine() {
     return entry && !entry.waiting ? entry : void 0;
   };
   let scale = C_MAJOR;
-  let split = "1+1+1+1";
   let voiceLayout = SPLITS["1+1+1+1"];
-  let splitChange = {
-    from: SPLITS["1+1+1+1"],
-    at: 0
-  };
+  let layoutChange = { from: voiceLayout, at: 0 };
+  let ticksPerBar = 1920;
   let resetTicks = 0;
   const voiceDevices = /* @__PURE__ */ new Map();
   function cycleHits(lane, cycleIndex, evolve = true) {
@@ -341,17 +339,17 @@ function createEngine() {
     const toPitch = (degree) => clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave);
     const start = cycleStart(lane, cycleIndex);
     return sounding.flatMap(({ onset, degree, count }, hit) => {
-      const before = start + onset < splitChange.at;
+      const before = start + onset < layoutChange.at;
       let duration = noteLength(gaps[hit]);
-      const cut = before && start + onset + duration > splitChange.at;
-      if (cut) duration = splitChange.at - start - onset;
+      const cut = before && start + onset + duration > layoutChange.at;
+      if (cut) duration = layoutChange.at - start - onset;
       const note = {
         onset,
         duration,
         velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
         ...tie && !cut && { tie }
       };
-      return allocate(lane, degree, count, toPitch, before ? splitChange.from : voiceLayout).map(({ voice, pitch }) => ({
+      return allocate(lane, degree, count, toPitch, before ? layoutChange.from : voiceLayout).map(({ voice, pitch }) => ({
         ...note,
         pitch,
         voice
@@ -384,6 +382,15 @@ function createEngine() {
   }
   function laneVoices(lane) {
     return voiceLayout[lane] ?? [];
+  }
+  function changeLayout(next, songTicks) {
+    if (songTicks === void 0) layoutChange = { from: next, at: 0 };
+    else {
+      let at = (Math.floor(songTicks / ticksPerBar) + 1) * ticksPerBar;
+      if (at - songTicks < CHANGE_LEAD) at += ticksPerBar;
+      layoutChange = { from: songTicks < layoutChange.at ? layoutChange.from : voiceLayout, at };
+    }
+    voiceLayout = next;
   }
   function stepTicks(lane) {
     return RATE_TICKS[lanes[lane].rate ?? "1/16"];
@@ -476,17 +483,42 @@ function createEngine() {
         else if (!entry.waiting) captures.delete(lane);
       }
       scale = config.scale ?? C_MAJOR;
-      split = config.split ?? "1+1+1+1";
-      const nextLayout = config.voiceLayout ?? SPLITS[split];
-      const prevLayout = config.previousVoiceLayout ?? (config.previousSplit ? SPLITS[config.previousSplit] : config.voiceLayout ? splitChange.from : nextLayout);
-      voiceLayout = nextLayout;
-      splitChange = { from: prevLayout, at: config.splitAt ?? 0 };
-      resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
+      ticksPerBar = config.ticksPerBar ?? 1920;
+      resetTicks = (config.resetBars ?? 0) * ticksPerBar;
     },
     cycleTicks,
     locate,
     renderCycle,
+    /** The Voices a Lane drives (after any pending Voice Layout change). */
     laneVoices,
+    /** Voicing Matrix click: put a Voice on a Lane, taking it off any other Lane, or take it off. songTicks: the
+     * song position while playing (the change lands on a bar), undefined while stopped (at once). Returns whether
+     * anything changed. */
+    setVoice(lane, voice, on, songTicks) {
+      if (laneVoices(lane).includes(voice) === on) return false;
+      const lanesCount = Math.max(voiceLayout.length, lane + 1);
+      const next = Array.from({ length: lanesCount }, (_, n) => {
+        const others = laneVoices(n).filter((v) => v !== voice);
+        return n === lane && on ? [...others, voice].sort((a, b) => a - b) : others;
+      });
+      changeLayout(next, songTicks);
+      return true;
+    },
+    /** Set the whole Voicing Matrix, e.g. to a Split; songTicks as for setVoice. */
+    setVoiceLayout(layout, songTicks) {
+      changeLayout(layout.map((voices) => [...voices]), songTicks);
+    },
+    /** The Voices a Lane's player must release: its own, plus those it gave up in a change that hasn't landed. */
+    releaseVoices(lane) {
+      return [.../* @__PURE__ */ new Set([...layoutChange.from[lane] ?? [], ...laneVoices(lane)])].sort((a, b) => a - b);
+    },
+    /** Forget the Voice Layout a change replaced once the bar it landed on has played (a jump back in the song
+     * then hears the new layout). Returns whether it did, i.e. whether releaseVoices may have changed. */
+    retireVoiceLayout(songTicks) {
+      if (layoutChange.from === voiceLayout || songTicks < layoutChange.at + ticksPerBar) return false;
+      layoutChange = { from: voiceLayout, at: 0 };
+      return true;
+    },
     cycleTable,
     slotTable,
     /** Which of the Lane's steps sound in a Cycle (for display). */

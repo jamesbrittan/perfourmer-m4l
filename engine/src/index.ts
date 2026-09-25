@@ -73,7 +73,7 @@ export type LaneParams = {
 };
 /** Live's global scale: root 0–11 (C = 0) and the semitone intervals of its notes. */
 export type Scale = { root: number; intervals: number[] };
-/** How the four Voices are divided into groups; Lanes take the groups in order. */
+/** Standard groupings of the four Voices, as Voicing Matrix presets: Lanes take the groups in order. */
 export const SPLITS = {
   "1+1+1+1": [[1], [2], [3], [4]],
   "4": [[1, 2, 3, 4]],
@@ -103,19 +103,15 @@ export type ChordShape = keyof typeof CHORD_SHAPES;
 /** Below this, a doubled bass note would be too low to hear: the chord is filled upwards instead. */
 const LOWEST_BASS = 24;
 
-/** resetBars 0 = never; ticksPerBar follows Live's time signature (4/4 = 1920). A Split change takes effect at
- * song tick splitAt: notes starting earlier use previousSplit, and any still sounding there end there. */
+/** resetBars 0 = never; ticksPerBar follows Live's time signature (4/4 = 1920). */
 export type EngineConfig = {
   lanes: LaneParams[];
   scale?: Scale;
   resetBars?: number;
   ticksPerBar?: number;
-  split?: Split;
-  previousSplit?: Split;
-  splitAt?: number;
-  voiceLayout?: readonly (readonly number[])[];
-  previousVoiceLayout?: readonly (readonly number[])[];
 };
+/** The Voicing Matrix as each Lane's Voices (1–4), Lane by Lane. */
+export type VoiceLayout = readonly (readonly number[])[];
 /** One player grid slot: the [voice, pitch, velocity] messages due there (velocity 0 = note-off). */
 export type Slot = { slot: number; notes: [number, number, number][] };
 /** A note-off that falls past the end of a Cycle, due at `slot` of the next one. */
@@ -123,6 +119,9 @@ export type Carry = { slot: number; voice: number; pitch: number; tie: boolean }
 export type CycleTable = { slots: Slot[]; carry: Carry[] };
 
 const MIDDLE_C = 60;
+/** A Voice Layout change made while playing waits for a bar at least this far ahead (an eighth note), so the
+ * Cycles rendered for it reach the player in time. */
+const CHANGE_LEAD = 240;
 const C_MAJOR: Scale = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
 
 /** Bjorklund's algorithm: the Euclidean rhythms as tabulated by Toussaint (first hit on step 0). */
@@ -167,12 +166,11 @@ export function createEngine() {
     return entry && !entry.waiting ? entry : undefined;
   };
   let scale = C_MAJOR;
-  let split: Split = "1+1+1+1";
-  let voiceLayout: readonly (readonly number[])[] = SPLITS["1+1+1+1"];
-  let splitChange: { from: readonly (readonly number[])[]; at: number } = {
-    from: SPLITS["1+1+1+1"],
-    at: 0,
-  };
+  let voiceLayout: VoiceLayout = SPLITS["1+1+1+1"];
+  // The Voice Layout a change replaced, and the song tick the change lands on: notes starting earlier use `from`,
+  // and any still sounding there end there. `from` is the current layout once the change is retired.
+  let layoutChange: { from: VoiceLayout; at: number } = { from: voiceLayout, at: 0 };
+  let ticksPerBar = 1920;
   let resetTicks = 0; // 0 = Lanes never realign
   const voiceDevices = new Map<number, number>(); // Voice device id -> Voice number
 
@@ -230,17 +228,17 @@ export function createEngine() {
     const toPitch = (degree: number) => clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave);
     const start = cycleStart(lane, cycleIndex);
     return sounding.flatMap(({ onset, degree, count }, hit) => {
-      const before = start + onset < splitChange.at; // started under the previous Split
+      const before = start + onset < layoutChange.at; // started under the previous Voice Layout
       let duration = noteLength(gaps[hit]);
-      const cut = before && start + onset + duration > splitChange.at; // still sounding when the Split changes
-      if (cut) duration = splitChange.at - start - onset;
+      const cut = before && start + onset + duration > layoutChange.at; // still sounding when the layout changes
+      if (cut) duration = layoutChange.at - start - onset;
       const note = {
         onset,
         duration,
         velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
         ...(tie && !cut && { tie }),
       };
-      return allocate(lane, degree, count, toPitch, before ? splitChange.from : voiceLayout).map(({ voice, pitch }) => ({
+      return allocate(lane, degree, count, toPitch, before ? layoutChange.from : voiceLayout).map(({ voice, pitch }) => ({
         ...note,
         pitch,
         voice,
@@ -266,7 +264,7 @@ export function createEngine() {
     degree: number,
     count: number,
     toPitch: (degree: number) => number,
-    layout: readonly (readonly number[])[],
+    layout: VoiceLayout,
   ) {
     const group: readonly number[] = layout[lane] ?? [];
     const { groupMode = "poly", chordShape = "triad" } = lanes[lane];
@@ -289,6 +287,18 @@ export function createEngine() {
 
   function laneVoices(lane: number): readonly number[] {
     return voiceLayout[lane] ?? [];
+  }
+
+  /** Change the Voice Layout: at once while stopped (songTicks undefined), else on the next bar far enough ahead.
+   * A change on top of one that hasn't landed yet replaces it, from the layout still sounding. */
+  function changeLayout(next: VoiceLayout, songTicks?: number) {
+    if (songTicks === undefined) layoutChange = { from: next, at: 0 };
+    else {
+      let at = (Math.floor(songTicks / ticksPerBar) + 1) * ticksPerBar;
+      if (at - songTicks < CHANGE_LEAD) at += ticksPerBar;
+      layoutChange = { from: songTicks < layoutChange.at ? layoutChange.from : voiceLayout, at };
+    }
+    voiceLayout = next;
   }
 
   function stepTicks(lane: number): number {
@@ -420,17 +430,42 @@ export function createEngine() {
         else if (!entry.waiting) captures.delete(lane);
       }
       scale = config.scale ?? C_MAJOR;
-      split = config.split ?? "1+1+1+1";
-      const nextLayout = config.voiceLayout ?? SPLITS[split];
-      const prevLayout = config.previousVoiceLayout ?? (config.previousSplit ? SPLITS[config.previousSplit] : (config.voiceLayout ? splitChange.from : nextLayout));
-      voiceLayout = nextLayout;
-      splitChange = { from: prevLayout, at: config.splitAt ?? 0 };
-      resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
+      ticksPerBar = config.ticksPerBar ?? 1920;
+      resetTicks = (config.resetBars ?? 0) * ticksPerBar;
     },
     cycleTicks,
     locate,
     renderCycle,
+    /** The Voices a Lane drives (after any pending Voice Layout change). */
     laneVoices,
+    /** Voicing Matrix click: put a Voice on a Lane, taking it off any other Lane, or take it off. songTicks: the
+     * song position while playing (the change lands on a bar), undefined while stopped (at once). Returns whether
+     * anything changed. */
+    setVoice(lane: number, voice: number, on: boolean, songTicks?: number): boolean {
+      if (laneVoices(lane).includes(voice) === on) return false;
+      const lanesCount = Math.max(voiceLayout.length, lane + 1);
+      const next = Array.from({ length: lanesCount }, (_, n) => {
+        const others = laneVoices(n).filter((v) => v !== voice);
+        return n === lane && on ? [...others, voice].sort((a, b) => a - b) : others;
+      });
+      changeLayout(next, songTicks);
+      return true;
+    },
+    /** Set the whole Voicing Matrix, e.g. to a Split; songTicks as for setVoice. */
+    setVoiceLayout(layout: VoiceLayout, songTicks?: number) {
+      changeLayout(layout.map((voices) => [...voices]), songTicks);
+    },
+    /** The Voices a Lane's player must release: its own, plus those it gave up in a change that hasn't landed. */
+    releaseVoices(lane: number): number[] {
+      return [...new Set([...(layoutChange.from[lane] ?? []), ...laneVoices(lane)])].sort((a, b) => a - b);
+    },
+    /** Forget the Voice Layout a change replaced once the bar it landed on has played (a jump back in the song
+     * then hears the new layout). Returns whether it did, i.e. whether releaseVoices may have changed. */
+    retireVoiceLayout(songTicks: number): boolean {
+      if (layoutChange.from === voiceLayout || songTicks < layoutChange.at + ticksPerBar) return false;
+      layoutChange = { from: voiceLayout, at: 0 };
+      return true;
+    },
     cycleTable,
     slotTable,
     /** Which of the Lane's steps sound in a Cycle (for display). */
