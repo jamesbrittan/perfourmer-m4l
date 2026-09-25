@@ -65,14 +65,55 @@ export type LaneParams = {
   probability?: number;
   mutation?: number;
   seed?: number;
+  groupMode?: GroupMode;
+  chordShape?: ChordShape;
   gate?: number;
   velocity?: number;
   accent?: number;
 };
 /** Live's global scale: root 0–11 (C = 0) and the semitone intervals of its notes. */
 export type Scale = { root: number; intervals: number[] };
-/** resetBars 0 = never; ticksPerBar follows Live's time signature (4/4 = 1920). */
-export type EngineConfig = { lanes: LaneParams[]; scale?: Scale; resetBars?: number; ticksPerBar?: number };
+/** How the four Voices are divided into groups; Lanes take the groups in order. */
+export const SPLITS = {
+  "1+1+1+1": [[1], [2], [3], [4]],
+  "4": [[1, 2, 3, 4]],
+  "1+3": [[1], [2, 3, 4]],
+  "2+2": [[1, 2], [3, 4]],
+  "1+1+2": [[1], [2], [3, 4]],
+} as const;
+export type Split = keyof typeof SPLITS;
+/** How a Lane uses a group of more than one Voice. */
+export const GROUP_MODES = ["poly", "round-robin", "unison"] as const;
+export type GroupMode = (typeof GROUP_MODES)[number];
+/** Scale-degree intervals stacked on each hit of a poly Lane. */
+export const CHORD_SHAPES = {
+  unison: [0],
+  "5th": [0, 4],
+  triad: [0, 2, 4],
+  "7th": [0, 2, 4, 6],
+  sus2: [0, 1, 4],
+  sus4: [0, 3, 4],
+  "6th": [0, 2, 4, 5],
+  add9: [0, 2, 4, 8],
+  quartal: [0, 3, 6, 9],
+  "open triad": [0, 4, 9],
+  octaves: [0, 7, 14, 21],
+} as const;
+export type ChordShape = keyof typeof CHORD_SHAPES;
+/** Below this, a doubled bass note would be too low to hear: the chord is filled upwards instead. */
+const LOWEST_BASS = 24;
+
+/** resetBars 0 = never; ticksPerBar follows Live's time signature (4/4 = 1920). A Split change takes effect at
+ * song tick splitAt: notes starting earlier use previousSplit, and any still sounding there end there. */
+export type EngineConfig = {
+  lanes: LaneParams[];
+  scale?: Scale;
+  resetBars?: number;
+  ticksPerBar?: number;
+  split?: Split;
+  previousSplit?: Split;
+  splitAt?: number;
+};
 /** One player grid slot: the [voice, pitch, velocity] messages due there (velocity 0 = note-off). */
 export type Slot = { slot: number; notes: [number, number, number][] };
 /** A note-off that falls past the end of a Cycle, due at `slot` of the next one. */
@@ -97,8 +138,6 @@ function bjorklund(hits: number, length: number): boolean[] {
   return groups.concat(remainder).flat();
 }
 
-type Note = Omit<Event, "voice">;
-
 /** One RNG seed per (Lane seed, Cycle). */
 const mix = (seed: number, cycleIndex: number) => (Math.imul(seed + 1, 0x9e3779b1) ^ Math.imul(cycleIndex + 1, 0x85ebca6b)) | 0;
 
@@ -109,11 +148,6 @@ function degreeToNote(degree: number, { root, intervals }: Scale): number {
   const octave = Math.floor(degree / intervals.length);
   const index = degree - octave * intervals.length;
   return MIDDLE_C + root + intervals[index] + 12 * octave;
-}
-
-/** Voice Layout: which Voice plays each of a Lane's notes. The MVP layout is 4×mono (Lane n → Voice n). */
-function allocate(lane: number, notes: Note[]): Event[] {
-  return notes.map((note) => ({ ...note, voice: lane + 1 }));
 }
 
 /** A Captured Base: which steps hit, and a scale degree for every step (a rest step keeps the previous hit's). */
@@ -131,6 +165,8 @@ export function createEngine() {
     return entry && !entry.waiting ? entry : undefined;
   };
   let scale = C_MAJOR;
+  let split: Split = "1+1+1+1";
+  let splitChange = { from: "1+1+1+1" as Split, at: 0 };
   let resetTicks = 0; // 0 = Lanes never realign
   const voiceDevices = new Map<number, number>(); // Voice device id -> Voice number
 
@@ -141,7 +177,7 @@ export function createEngine() {
    * then each hit sounds with the Lane's probability. The draws come from an RNG seeded by (seed, cycleIndex), a
    * fixed number per step, so a Cycle is reproducible from song position whatever the other settings.
    */
-  function cycleHits(lane: number, cycleIndex: number, evolve = true): { onset: number; degree: number }[] {
+  function cycleHits(lane: number, cycleIndex: number, evolve = true): { onset: number; degree: number; count: number }[] {
     const { hits, length, rotate, pitchCycle = [0], seed = 0 } = lanes[lane];
     const { mutation, probability } = evolve ? { mutation: 0, probability: 100, ...lanes[lane] } : { mutation: 0, probability: 100 };
     const stack = active(lane)?.stack;
@@ -156,18 +192,20 @@ export function createEngine() {
     const baseHits = base.filter(Boolean).length;
     const density = captured ? baseHits / length : hits / length;
     let hitIndex = cyclesSinceReset(lane, cycleIndex) * baseHits; // the Pitch Cycle realigns at each Reset
+    let count = cyclesSinceReset(lane, cycleIndex) * baseHits; // hits since the Reset, for round-robin
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
-    const sounding: { onset: number; degree: number }[] = [];
+    const sounding: { onset: number; degree: number; count: number }[] = [];
     base.forEach((isHit, i) => {
       const [stepDraw, hitDraw, pitchDraw, degreeDraw, soundDraw] = [chance(), chance(), chance(), chance(), chance()];
       const hit = stepDraw < mutation / 127 ? hitDraw < density : isHit;
       if (!hit) return;
+      const hitCount = count++;
       const baseDegree = captured ? captured.degrees[i] : pitchCycle[hitIndex++ % pitchCycle.length];
       const degree = pitchDraw < mutation / 127 ? lo + Math.floor(degreeDraw * (hi - lo + 1)) : baseDegree;
       const onset = i * step;
       // a dropped hit still uses up its Pitch Cycle step; hits from a Reset cut on are never reached
-      if (soundDraw * 100 < probability && onset < end - 1e-6) sounding.push({ onset, degree });
+      if (soundDraw * 100 < probability && onset < end - 1e-6) sounding.push({ onset, degree, count: hitCount });
     });
     return sounding;
   }
@@ -183,14 +221,68 @@ export function createEngine() {
     const tie = gate >= 100;
     const noteLength = (gap: number) =>
       gate <= 50 ? (step * gate) / 100 : step / 2 + ((gap - step / 2) * (gate - 50)) / 50; // short … half a step … tied
-    const notes = sounding.map(({ onset, degree }, hit) => ({
-      onset,
-      duration: noteLength(gaps[hit]),
-      pitch: clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave),
-      velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
-      ...(tie && { tie }),
-    }));
-    return allocate(lane, notes);
+    const toPitch = (degree: number) => clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave);
+    const start = cycleStart(lane, cycleIndex);
+    return sounding.flatMap(({ onset, degree, count }, hit) => {
+      const before = start + onset < splitChange.at; // started under the previous Split
+      let duration = noteLength(gaps[hit]);
+      const cut = before && start + onset + duration > splitChange.at; // still sounding when the Split changes
+      if (cut) duration = splitChange.at - start - onset;
+      const note = {
+        onset,
+        duration,
+        velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
+        ...(tie && !cut && { tie }),
+      };
+      return allocate(lane, degree, count, toPitch, before ? splitChange.from : split).map(({ voice, pitch }) => ({
+        ...note,
+        pitch,
+        voice,
+      }));
+    });
+  }
+
+  /** The song tick a Cycle starts at (the inverse of locate). */
+  function cycleStart(lane: number, cycleIndex: number): number {
+    if (!resetTicks) return cycleIndex * cycleTicks(lane);
+    const perPeriod = cyclesPerPeriod(lane);
+    return Math.floor(cycleIndex / perPeriod) * resetTicks + (cycleIndex % perPeriod) * cycleTicks(lane);
+  }
+
+  /**
+   * Voice Layout: which Voices play a hit, and at which pitches. A single Voice plays the hit; a poly group plays
+   * the Chord Shape, lowest note on the highest-numbered Voice (the bottom of the Perfourmer's panel), doubling
+   * the bass when the chord is smaller than the group; round-robin takes the group's Voices in turn, counting
+   * hits since the last Reset; unison plays the hit on every Voice.
+   */
+  function allocate(
+    lane: number,
+    degree: number,
+    count: number,
+    toPitch: (degree: number) => number,
+    layout: Split,
+  ) {
+    const group: readonly number[] = SPLITS[layout][lane] ?? [];
+    const { groupMode = "poly", chordShape = "triad" } = lanes[lane];
+    if (group.length === 1 || (group.length && groupMode !== "poly")) {
+      if (groupMode === "unison") return group.map((voice) => ({ voice, pitch: toPitch(degree) }));
+      return [{ voice: group[count % group.length], pitch: toPitch(degree) }];
+    }
+    const chord = [...new Set(CHORD_SHAPES[chordShape].map((d) => toPitch(degree + d)))].sort((a, b) => a - b);
+    const root = toPitch(degree);
+    for (let up = 12; chord.length < group.length; up += 12) {
+      const below = chord[0] - 12;
+      const fill = below >= LOWEST_BASS && !chord.includes(below) ? below : root + up; // an octave down, else up
+      if (fill <= 127 && !chord.includes(fill)) chord.push(fill);
+      else if (fill > 127) break;
+      chord.sort((a, b) => a - b);
+    }
+    const highestFirst = [...group].reverse();
+    return chord.slice(0, group.length).map((pitch, i) => ({ voice: highestFirst[i], pitch }));
+  }
+
+  function laneVoices(lane: number): readonly number[] {
+    return SPLITS[split][lane] ?? [];
   }
 
   function stepTicks(lane: number): number {
@@ -322,11 +414,14 @@ export function createEngine() {
         else if (!entry.waiting) captures.delete(lane);
       }
       scale = config.scale ?? C_MAJOR;
+      split = config.split ?? "1+1+1+1";
+      splitChange = { from: config.previousSplit ?? split, at: config.splitAt ?? 0 };
       resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
     },
     cycleTicks,
     locate,
     renderCycle,
+    laneVoices,
     cycleTable,
     slotTable,
     /** Which of the Lane's steps sound in a Cycle (for display). */
