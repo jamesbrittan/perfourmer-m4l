@@ -143,10 +143,12 @@ class Patch:
     def comment(self, text, x, y, w=None):
         return self.add("comment", x, y, w=w, text=text, ins=1, outs=0)
 
-    def param(self, maxclass, name, x, y, lo, hi, initial, w=44, h=48, short=None, enum=None):
+    def param(self, maxclass, name, x, y, lo, hi, initial, w=44, h=48, short=None, enum=None, stored_only=False):
         valueof = {"parameter_longname": name, "parameter_shortname": short or name,
                    "parameter_type": 1, "parameter_mmin": lo, "parameter_mmax": hi,
                    "parameter_initial": [initial], "parameter_initial_enable": 1}
+        if stored_only:  # saved with the set, but not automatable or mappable
+            valueof["parameter_invisible"] = 1
         if enum:  # named choices, e.g. rates; the object outputs the choice's index
             valueof.update(parameter_type=2, parameter_enum=enum, parameter_mmax=len(enum) - 1)
         return self.add(maxclass, x, y, w=w, h=h, ins=1, outs=2, parameter_enable=1,
@@ -185,6 +187,7 @@ LANE_DEFAULTS = [(5, 8, 0), (3, 8, 0), (2, 5, 0), (7, 12, 0)]  # must match para
 PITCH_DEFAULTS = [([0, 4, 2, 5], 0), ([0, 2, 4], -1), ([0, -3], -2), ([4, 6, 7, 9, 11], 0)]  # (Pitch Cycle, octave)
 PITCH_STEPS = 8
 ARTICULATION_DEFAULTS = (50, 100, 0)  # Gate %, Velocity, Accent; must match pf4-hub.js
+EVOLUTION_DEFAULTS = (100, 0)  # Probability %, Mutation; the seed defaults to the Lane number (pf4-hub.js)
 PLAYER_DICT = "pf4.player"  # each Lane's playing bank, read by the adapter (pf4-hub.js)
 RATES = ["1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16Q", "1/16T", "1/16S", "1/32", "1/32Q"]  # = engine RATES
 DEFAULT_RATE = RATES.index("1/16")
@@ -286,7 +289,8 @@ def build_hub():
         if n == 0:
             for label, ax in (("Len", 602), ("Pitch Cycle (scale degrees)", 636), ("Trans", 850), ("Oct", 884)):
                 P.comment(label, ax, 4, 140 if ax == 636 else 34)
-            for label, ax in (("Gate %", 972), ("Vel", 1008), ("Accent", 1044)):
+            for label, ax in (("Gate %", 972), ("Vel", 1008), ("Accent", 1044),
+                              ("Prob %", 1084), ("Mutate", 1120), ("Seed", 1156)):
                 P.comment(label, ax, 4, 34)
         gate = P.param("live.numbox", f"L{n + 1} Gate", 972, py, 1, 100, gate_d, w=32, h=18, short="Gate %")
         vel = P.param("live.numbox", f"L{n + 1} Velocity", 1008, py, 1, 127, vel_d, w=32, h=18, short="Vel")
@@ -297,6 +301,17 @@ def build_hub():
         for i, box in enumerate((gate, vel, acc)):
             P.c(box, artic, 0, i)
         P.c(artic, to_artic); P.c(to_artic, adapter)
+        # Evolution: Probability, Mutation, Seed — from the next Cycle
+        prob_d, mut_d = EVOLUTION_DEFAULTS
+        prob = P.param("live.numbox", f"L{n + 1} Probability", 1084, py, 0, 100, prob_d, w=32, h=18, short="Prob %")
+        mut = P.param("live.numbox", f"L{n + 1} Mutation", 1120, py, 0, 127, mut_d, w=32, h=18, short="Mutate")
+        seed = P.param("live.numbox", f"L{n + 1} Seed", 1156, py, 0, 999, n + 1, w=32, h=18, short="Seed",
+                       stored_only=True)
+        evo = P.obj(f"pak {prob_d} {mut_d} {n + 1}", lx + 150, Y + 850, ins=3)
+        to_evo = P.obj(f"prepend evolve {n}", lx + 150, Y + 880)
+        for i, box in enumerate((prob, mut, seed)):
+            P.c(box, evo, 0, i)
+        P.c(evo, to_evo); P.c(to_evo, adapter)
         py_l = Y + 700  # this Lane's pitch logic
         initial = " ".join(str(degrees[i] if i < len(degrees) else 0) for i in range(PITCH_STEPS))
         pitch = P.obj(f"pak {len(degrees)} {initial}", lx, py_l, ins=9)
@@ -396,7 +411,7 @@ def build_hub():
         # (no adoption on transport start: the playing bank already holds the Cycle at the song position, and a
         # bank still pending from before the stop would swap tables under a sounding note)
 
-    P.save_amxd("PF4 Hub.amxd", 1080)
+    P.save_amxd("PF4 Hub.amxd", 1192)
 
 
 def build_voice():

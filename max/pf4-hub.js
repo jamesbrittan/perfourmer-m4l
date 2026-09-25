@@ -26,14 +26,14 @@ const LANES = 4;
 const NEVER = 1e12; // "no Reset" as a period the player's modulo can use
 
 const engine = createEngine();
-// defaults must match LANE_DEFAULTS, PITCH_DEFAULTS and ARTICULATION_DEFAULTS in build_devices.py
-const articulation = { gate: 50, velocity: 100, accent: 0 };
+// defaults must match LANE_DEFAULTS, PITCH_DEFAULTS, ARTICULATION_DEFAULTS and EVOLUTION_DEFAULTS in build_devices.py
+const articulation = { gate: 50, velocity: 100, accent: 0, probability: 100, mutation: 0 };
 const params = [
   { hits: 5, length: 8, rotate: 0, rate: "1/16", pitchCycle: [0, 4, 2, 5], transpose: 0, octave: 0, ...articulation },
   { hits: 3, length: 8, rotate: 0, rate: "1/16", pitchCycle: [0, 2, 4], transpose: 0, octave: -1, ...articulation },
   { hits: 2, length: 5, rotate: 0, rate: "1/16", pitchCycle: [0, -3], transpose: 0, octave: -2, ...articulation },
   { hits: 7, length: 12, rotate: 0, rate: "1/16", pitchCycle: [4, 6, 7, 9, 11], transpose: 0, octave: 0, ...articulation },
-];
+].map((lane, n) => ({ ...lane, seed: n + 1 }));
 const song = { resetBars: 0, ticksPerBar: 1920, scale: { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] } };
 const writtenKeys = params.map(() => [[], []]);
 const bankCycle = params.map(() => [0, 0]); // the Cycle each bank holds
@@ -77,6 +77,12 @@ function articulate(n, gate, velocity, accent) {
   engine.configure({ lanes: params, ...song });
   if (!playing) return refresh(n);
   render(n, null, true);
+}
+
+// Probability %, Mutation 0–127, Seed: from the next Cycle
+function evolve(n, probability, mutation, seed) {
+  Object.assign(params[n], { probability, mutation, seed });
+  refresh(n);
 }
 
 function transpose(n, degrees, octaves) {

@@ -24,6 +24,177 @@ __export(index_exports, {
   createEngine: () => createEngine
 });
 module.exports = __toCommonJS(index_exports);
+
+// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+function uniformIntInternal(rng, rangeSize) {
+  const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
+  let deltaV = rng.next() + 2147483648;
+  while (deltaV >= MaxAllowed) deltaV = rng.next() + 2147483648;
+  return deltaV % rangeSize;
+}
+function fromNumberToArrayInt64(out, n) {
+  if (n < 0) {
+    const posN = -n;
+    out.sign = -1;
+    out.data[0] = ~~(posN / 4294967296);
+    out.data[1] = posN >>> 0;
+  } else {
+    out.sign = 1;
+    out.data[0] = ~~(n / 4294967296);
+    out.data[1] = n >>> 0;
+  }
+  return out;
+}
+function substractArrayInt64(out, arrayIntA, arrayIntB) {
+  const lowA = arrayIntA.data[1];
+  const highA = arrayIntA.data[0];
+  const signA = arrayIntA.sign;
+  const lowB = arrayIntB.data[1];
+  const highB = arrayIntB.data[0];
+  const signB = arrayIntB.sign;
+  out.sign = 1;
+  if (signA === 1 && signB === -1) {
+    const low2 = lowA + lowB;
+    const high = highA + highB + (low2 > 4294967295 ? 1 : 0);
+    out.data[0] = high >>> 0;
+    out.data[1] = low2 >>> 0;
+    return out;
+  }
+  let lowFirst = lowA;
+  let highFirst = highA;
+  let lowSecond = lowB;
+  let highSecond = highB;
+  if (signA === -1) {
+    lowFirst = lowB;
+    highFirst = highB;
+    lowSecond = lowA;
+    highSecond = highA;
+  }
+  let reminderLow = 0;
+  let low = lowFirst - lowSecond;
+  if (low < 0) {
+    reminderLow = 1;
+    low = low >>> 0;
+  }
+  out.data[0] = highFirst - highSecond - reminderLow;
+  out.data[1] = low;
+  return out;
+}
+function uniformArrayIntInternal(rng, out, rangeSize) {
+  const maxIndex0 = rangeSize[0] + 1;
+  out[0] = uniformIntInternal(rng, maxIndex0);
+  out[1] = uniformIntInternal(rng, 4294967296);
+  while (out[0] >= rangeSize[0] && (out[0] !== rangeSize[0] || out[1] >= rangeSize[1])) {
+    out[0] = uniformIntInternal(rng, maxIndex0);
+    out[1] = uniformIntInternal(rng, 4294967296);
+  }
+  return out;
+}
+var safeNumberMaxSafeInteger = Number.MAX_SAFE_INTEGER;
+var sharedA = {
+  sign: 1,
+  data: [0, 0]
+};
+var sharedB = {
+  sign: 1,
+  data: [0, 0]
+};
+var sharedC = {
+  sign: 1,
+  data: [0, 0]
+};
+var sharedData = [0, 0];
+function uniformLargeIntInternal(rng, from, to, rangeSize) {
+  const rangeSizeArrayIntValue = rangeSize <= safeNumberMaxSafeInteger ? fromNumberToArrayInt64(sharedC, rangeSize) : substractArrayInt64(sharedC, fromNumberToArrayInt64(sharedA, to), fromNumberToArrayInt64(sharedB, from));
+  if (rangeSizeArrayIntValue.data[1] === 4294967295) {
+    rangeSizeArrayIntValue.data[0] += 1;
+    rangeSizeArrayIntValue.data[1] = 0;
+  } else rangeSizeArrayIntValue.data[1] += 1;
+  uniformArrayIntInternal(rng, sharedData, rangeSizeArrayIntValue.data);
+  return sharedData[0] * 4294967296 + sharedData[1] + from;
+}
+function uniformInt(rng, from, to) {
+  const rangeSize = to - from;
+  if (rangeSize <= 4294967295) return uniformIntInternal(rng, rangeSize + 1) + from;
+  return uniformLargeIntInternal(rng, from, to, rangeSize);
+}
+
+// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+var jumps = [
+  3639956645,
+  3750757012,
+  1261568508,
+  386426335
+];
+var XoroShiro128Plus = class XoroShiro128Plus2 {
+  constructor(s01, s00, s11, s10) {
+    this.s01 = s01;
+    this.s00 = s00;
+    this.s11 = s11;
+    this.s10 = s10;
+  }
+  clone() {
+    return new XoroShiro128Plus2(this.s01, this.s00, this.s11, this.s10);
+  }
+  next() {
+    const out = this.s00 + this.s10 | 0;
+    const a0 = this.s10 ^ this.s00;
+    const a1 = this.s11 ^ this.s01;
+    const s00 = this.s00;
+    const s01 = this.s01;
+    this.s00 = s00 << 24 ^ s01 >>> 8 ^ a0 ^ a0 << 16;
+    this.s01 = s01 << 24 ^ s00 >>> 8 ^ a1 ^ (a1 << 16 | a0 >>> 16);
+    this.s10 = a1 << 5 ^ a0 >>> 27;
+    this.s11 = a0 << 5 ^ a1 >>> 27;
+    return out;
+  }
+  jump() {
+    let ns01 = 0;
+    let ns00 = 0;
+    let ns11 = 0;
+    let ns10 = 0;
+    let s01 = this.s01;
+    let s00 = this.s00;
+    let s11 = this.s11;
+    let s10 = this.s10;
+    for (let i = 0; i !== 4; ++i) {
+      const ji = jumps[i];
+      for (let mask = 1; mask; mask <<= 1) {
+        if (ji & mask) {
+          ns01 ^= s01;
+          ns00 ^= s00;
+          ns11 ^= s11;
+          ns10 ^= s10;
+        }
+        const a0 = s10 ^ s00;
+        const a1 = s11 ^ s01;
+        const s00_ = s00;
+        const s01_ = s01;
+        s00 = s00_ << 24 ^ s01_ >>> 8 ^ a0 ^ a0 << 16;
+        s01 = s01_ << 24 ^ s00_ >>> 8 ^ a1 ^ (a1 << 16 | a0 >>> 16);
+        s10 = a1 << 5 ^ a0 >>> 27;
+        s11 = a0 << 5 ^ a1 >>> 27;
+      }
+    }
+    this.s01 = ns01;
+    this.s00 = ns00;
+    this.s11 = ns11;
+    this.s10 = ns10;
+  }
+  getState() {
+    return [
+      this.s01,
+      this.s00,
+      this.s11,
+      this.s10
+    ];
+  }
+};
+function xoroshiro128plus(seed) {
+  return new XoroShiro128Plus(-1, ~seed, seed | 0, 0);
+}
+
+// src/index.ts
 var RATE_TICKS = {
   "1/1": 1920,
   "1/2": 960,
@@ -54,6 +225,7 @@ function bjorklund(hits, length) {
   } while (remainder.length > 1);
   return groups.concat(remainder).flat();
 }
+var mix = (seed, cycleIndex) => Math.imul(seed + 1, 2654435761) ^ Math.imul(cycleIndex + 1, 2246822507) | 0;
 var clampToMidi = (note) => Math.max(0, Math.min(127, note));
 function degreeToNote(degree, { root, intervals }) {
   const octave = Math.floor(degree / intervals.length);
@@ -68,24 +240,43 @@ function createEngine() {
   let scale = C_MAJOR;
   let resetTicks = 0;
   const voiceDevices = /* @__PURE__ */ new Map();
-  function renderCycle(lane, cycleIndex) {
-    const { hits, length, rotate, pitchCycle = [0], transpose = 0, octave = 0 } = lanes[lane];
-    const { gate = 50, velocity = 100, accent = 0 } = lanes[lane];
+  function cycleHits(lane, cycleIndex) {
+    const { hits, length, rotate, pitchCycle = [0], mutation = 0, probability = 100, seed = 0 } = lanes[lane];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
-    const rotated = pattern.map((_, step2) => pattern[(step2 - shift + length) % length]);
+    const base = pattern.map((_, step2) => pattern[(step2 - shift + length) % length]);
+    const rng = xoroshiro128plus(mix(seed, cycleIndex));
+    const chance = () => uniformInt(rng, 0, 99999) / 1e5;
+    const [lo, hi] = [Math.min(...pitchCycle) - 3, Math.max(...pitchCycle) + 3];
+    const baseHits = base.filter(Boolean).length;
+    let hitIndex = cyclesSinceReset(lane, cycleIndex) * baseHits;
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
-    const patternOnsets = rotated.flatMap((hit, i) => hit ? [i * step] : []);
-    const onsets = patternOnsets.filter((onset) => onset < end - 1e-6);
-    const gaps = onsets.map((onset, i) => (i + 1 < onsets.length ? onsets[i + 1] : end + patternOnsets[0]) - onset);
+    const sounding = [];
+    base.forEach((isHit, i) => {
+      const [stepDraw, hitDraw, pitchDraw, degreeDraw, soundDraw] = [chance(), chance(), chance(), chance(), chance()];
+      const hit = stepDraw < mutation / 127 ? hitDraw < hits / length : isHit;
+      if (!hit) return;
+      const baseDegree = pitchCycle[hitIndex++ % pitchCycle.length];
+      const degree = pitchDraw < mutation / 127 ? lo + Math.floor(degreeDraw * (hi - lo + 1)) : baseDegree;
+      const onset = i * step;
+      if (soundDraw * 100 < probability && onset < end - 1e-6) sounding.push({ onset, degree });
+    });
+    return sounding;
+  }
+  function renderCycle(lane, cycleIndex) {
+    const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0 } = lanes[lane];
+    const step = stepTicks(lane);
+    const end = playedTicks(lane, cycleIndex);
+    const sounding = cycleHits(lane, cycleIndex);
+    const next = cycleHits(lane, cycleIndex + 1)[0]?.onset ?? playedTicks(lane, cycleIndex + 1);
+    const gaps = sounding.map(({ onset }, i) => (i + 1 < sounding.length ? sounding[i + 1].onset : end + next) - onset);
     const tie = gate >= 100;
     const noteLength = (gap) => gate <= 50 ? step * gate / 100 : step / 2 + (gap - step / 2) * (gate - 50) / 50;
-    const hitsBefore = cyclesSinceReset(lane, cycleIndex) * patternOnsets.length;
-    const notes = onsets.map((onset, hit) => ({
+    const notes = sounding.map(({ onset, degree }, hit) => ({
       onset,
       duration: noteLength(gaps[hit]),
-      pitch: clampToMidi(degreeToNote(pitchCycle[(hitsBefore + hit) % pitchCycle.length] + transpose, scale) + 12 * octave),
+      pitch: clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave),
       velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
       ...tie && { tie }
     }));
