@@ -22,6 +22,8 @@ var index_exports = {};
 __export(index_exports, {
   CHORD_SHAPES: () => CHORD_SHAPES,
   CONTROL_NAMES: () => CONTROL_NAMES,
+  FREEZE_BASE: () => FREEZE_BASE,
+  FREEZE_OFF: () => FREEZE_OFF,
   GROUP_MODES: () => GROUP_MODES,
   HUB_OUTLETS: () => HUB_OUTLETS,
   LANES: () => LANES,
@@ -275,9 +277,13 @@ var HUB_OUTLETS = {
   // "<lane> set <text>"
   releaseVoices: 12,
   // "<lane> <voice> …" the Voices the player releases for that Lane
-  script: 13
+  script: 13,
   // scripting messages to thispatcher
+  frozen: 14
+  // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
 };
+var FREEZE_OFF = -1;
+var FREEZE_BASE = -2;
 var CONTROL_NAMES = {
   voiceButton: "btn_L{lane}_V{voice}",
   groupMode: "menu_L{lane}_gm",
@@ -533,7 +539,10 @@ function createEngine() {
   const views = /* @__PURE__ */ new Map();
   const voiceDevices = /* @__PURE__ */ new Map();
   function cycleHits(lane, cycleIndex, evolve = true) {
-    const { hits, length, rotate, pitchCycle = [0], seed = 0 } = lanes[lane];
+    const { hits, length, rotate, pitchCycle = [0], seed = 0, freeze } = lanes[lane];
+    if (freeze === "base") evolve = false;
+    const end = playedTicks(lane, cycleIndex);
+    if (typeof freeze === "number") cycleIndex = freeze;
     const { mutation, probability } = evolve ? { mutation: 0, probability: 100, ...lanes[lane] } : { mutation: 0, probability: 100 };
     const stack = active(lane)?.stack;
     const captured = stack?.[stack.length - 1];
@@ -549,7 +558,6 @@ function createEngine() {
     let hitIndex = cyclesSinceReset(lane, cycleIndex) * baseHits;
     let count = cyclesSinceReset(lane, cycleIndex) * baseHits;
     const step = stepTicks(lane);
-    const end = playedTicks(lane, cycleIndex);
     const sounding = [];
     base.forEach((isHit, i) => {
       const [stepDraw, hitDraw, pitchDraw, degreeDraw, soundDraw] = [chance(), chance(), chance(), chance(), chance()];
@@ -822,6 +830,7 @@ function createEngine() {
       const entry = active(lane) ?? { signature: signature(lanes[lane]), stack: [] };
       entry.stack.push({ steps, degrees });
       captures.set(lane, entry);
+      if (lanes[lane].freeze !== void 0) lanes[lane] = { ...lanes[lane], freeze: "base" };
       basesChanged++;
     },
     /** Go back to the Base from before the last Capture. */

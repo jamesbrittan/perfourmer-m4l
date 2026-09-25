@@ -72,7 +72,12 @@ export const HUB_OUTLETS = {
   laneVoices: 11, // "<lane> set <text>"
   releaseVoices: 12, // "<lane> <voice> …" the Voices the player releases for that Lane
   script: 13, // scripting messages to thispatcher
+  frozen: 14, // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
 } as const;
+
+/** How a Lane's Freeze is stored with the set: off, holding its Base (after a Capture while frozen), or the Cycle. */
+export const FREEZE_OFF = -1;
+export const FREEZE_BASE = -2;
 
 /** Scripting names of the controls the Hub script addresses ({lane} and {voice} count from 1). */
 export const CONTROL_NAMES = {

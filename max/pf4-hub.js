@@ -18,6 +18,8 @@ const {
   LANES,
   PLAYER,
   VOICES,
+  FREEZE_OFF,
+  FREEZE_BASE,
 } = require("pf4-engine.js");
 
 outlets = Object.keys(OUT).length; // what each carries: HUB_OUTLETS in the engine
@@ -86,6 +88,7 @@ function evolve(n, probability, mutation, seed) {
 function capture(n) {
   engine.capture(n, scheduler.captureCycle(n));
   storeBases();
+  storeFrozen(); // a frozen Lane now holds the new Base
   refresh(n);
 }
 
@@ -166,6 +169,44 @@ function updateMatrixActiveStates() {
       }
     }
   }
+}
+
+// Freeze toggle: hold the Cycle sounding now (heard from the next Cycle), leaving Mutation as it is; off: evolve again
+// from the song position. Which Cycle each Lane holds is saved with the set (stored-only pattr), so a set reopened
+// while frozen holds the same one. Live restores the toggle and the pattr in either order: a stored value not yet
+// taken up waits for the toggle.
+const freezeOn = Array.from({ length: LANES }, () => false);
+const restoredFreeze = Array.from({ length: LANES }, () => FREEZE_OFF);
+let storedFrozen = "";
+const fromStored = (value) => (value === FREEZE_BASE ? "base" : value >= 0 ? value : undefined);
+function freeze(n, on) {
+  freezeOn[n] = Boolean(Number(on));
+  const restored = restoredFreeze[n];
+  restoredFreeze[n] = FREEZE_OFF;
+  const held = !freezeOn[n] ? undefined : restored !== FREEZE_OFF ? fromStored(restored) : scheduler.captureCycle(n);
+  engine.setLane(n, { freeze: held });
+  storeFrozen();
+  refresh(n);
+}
+
+function storeFrozen() {
+  const data = Array.from({ length: LANES }, (_, n) => {
+    const held = engine.laneSettings(n).freeze;
+    return held === undefined ? FREEZE_OFF : held === "base" ? FREEZE_BASE : held;
+  });
+  storedFrozen = data.join(" ");
+  outlet(OUT.frozen, data);
+}
+
+// the pattr's saved value, when the set (or a preset) loads — and its echo of what we just stored
+function frozen(...data) {
+  if (data.join(" ") === storedFrozen) return;
+  storedFrozen = data.join(" ");
+  data.slice(0, LANES).forEach((value, n) => {
+    if (!freezeOn[n]) return void (restoredFreeze[n] = value);
+    engine.setLane(n, { freeze: fromStored(value) ?? scheduler.captureCycle(n) });
+    refresh(n);
+  });
 }
 
 // Group Mode and Chord Shape (menu indices): from the Lane's next Cycle

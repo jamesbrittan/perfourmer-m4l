@@ -43,6 +43,11 @@ function hub(engine: ReturnType<typeof createEngine>, scheduler: ReturnType<type
       engine.setSong({ scale });
       for (let n = 0; n < LANES; n++) scheduler.changed(n);
     },
+    /** Freeze on: hold the Cycle sounding now (from the next Cycle); off: evolve again from the next Cycle. */
+    freeze(n: number, on: boolean) {
+      engine.setLane(n, { freeze: on ? scheduler.captureCycle(n) : undefined });
+      scheduler.changed(n);
+    },
     capture(n: number) {
       engine.capture(n, scheduler.captureCycle(n));
       scheduler.changed(n);
