@@ -35,9 +35,21 @@ def device_file(name):
 # Live's Info View help: (title, text) per control kind. Parameters match by name without their "L<n> " Lane prefix;
 # readouts match by the text they start with (see info_for). One table for every control, so later ones pick it up.
 HELP = {
+    "Hub Tab": ("Hub Tab", "Switches between Rhythm, Pitch, Feel, Evolve, Timbre and Voicing pages."),
+    "VCF Depth": ("VCF Depth", "How far the Lane's aftertouch LFO sweeps (the Perfourmer's VCF cutoff, with "
+                  "Edit 3 on). 0 = no aftertouch sent."),
+    "VCF Rate": ("VCF Rate", "Length of one VCF sweep, in bars of four beats. Follows song position, "
+                 "so it replays the same way."),
+    "Voice 1": ("Voice 1", "Assigns Perfourmer Voice 1 to this Lane (each Voice can belong to at most one Lane)."),
+    "Voice 2": ("Voice 2", "Assigns Perfourmer Voice 2 to this Lane (each Voice can belong to at most one Lane)."),
+    "Voice 3": ("Voice 3", "Assigns Perfourmer Voice 3 to this Lane (each Voice can belong to at most one Lane)."),
+    "Voice 4": ("Voice 4", "Assigns Perfourmer Voice 4 to this Lane (each Voice can belong to at most one Lane)."),
+    "PWM Depth": ("PWM Depth", "How far the Lane's CC1 LFO sweeps (the Perfourmer's pulse width). 0 = no CC1 "
+                  "sent."),
+    "PWM Rate": ("PWM Rate", "Length of one PWM sweep, in bars of four beats. Follows song position."),
     "Hits": ("Hits", "How many of the Lane's steps play, spread as evenly as possible (a Euclidean rhythm). "
              "Can't exceed Length. Takes effect from the Lane's next Cycle."),
-    "Length": ("Length", "How many steps the Lane's Cycle has (1–64). The rhythm repeats every Cycle. "
+    "Length": ("Length", "How many steps the Lane's Cycle has (1–32). The rhythm repeats every Cycle. "
                "Takes effect from the next Cycle."),
     "Rotate": ("Rotate", "Shifts the hits later by this many steps. Takes effect from the next Cycle."),
     "Rate": ("Rate", "How long each step lasts: 1/1 to 1/32, with triplets (T), quintuplets (Q) and septuplets (S). "
@@ -106,6 +118,8 @@ def info_for(box):
     """The Info View help for a box: parameters by name, readouts by the text they start with."""
     name = box.get("saved_attribute_attributes", {}).get("valueof", {}).get("parameter_longname")
     if name:
+        if name in HELP:
+            return HELP[name]
         kind = re.sub(r"^L\d+ ", "", name)
         return HELP.get(kind) or HELP.get(re.sub(r" \d+$", "", kind))
     text = box.get("text", "")
@@ -139,8 +153,9 @@ def embedded(script, inline_engine=False):
 class Patch:
     def __init__(self):
         self.boxes, self.lines, self.n = [], [], 0
+        self.tabs = {}  # tab_idx -> list of box varnames
 
-    def add(self, maxclass, x, y, w=None, h=22, text=None, ins=1, outs=1, **extra):
+    def add(self, maxclass, x, y, w=None, h=22, text=None, ins=1, outs=1, tab=None, **extra):
         self.n += 1
         oid = f"obj-{self.n}"
         box = {"id": oid, "maxclass": maxclass, "numinlets": ins, "numoutlets": outs,
@@ -149,25 +164,31 @@ class Patch:
             box["text"] = text
         if outs:
             box["outlettype"] = [""] * outs
+        if tab is not None:
+            varname = extra.get("varname") or oid
+            box["varname"] = varname
+            if tab > 0:
+                box["hidden"] = 1
+            self.tabs.setdefault(tab, []).append(varname)
         box.update(extra)
         self.boxes.append({"box": box})
         return oid
 
-    def obj(self, text, x, y, ins=1, outs=1, **kw):
-        return self.add("newobj", x, y, text=text, ins=ins, outs=outs, **kw)
+    def obj(self, text, x, y, ins=1, outs=1, tab=None, **kw):
+        return self.add("newobj", x, y, text=text, ins=ins, outs=outs, tab=tab, **kw)
 
-    def msg(self, text, x, y):
-        return self.add("message", x, y, text=text, ins=2, outs=1)
+    def msg(self, text, x, y, w=None, h=22, tab=None, **kw):
+        return self.add("message", x, y, w=w, h=h, text=text, ins=2, outs=1, tab=tab, **kw)
 
     def codebox(self, code, x, y, ins=1, outs=1):
         """A v8 object whose JavaScript is stored inside the device, so copies and presets stay self-contained."""
         return self.add("v8.codebox", x, y, w=200, h=60, ins=ins, outs=outs, code=code, filename="none",
                         saved_object_attributes={"parameter_enable": 0})
 
-    def comment(self, text, x, y, w=None):
-        return self.add("comment", x, y, w=w, text=text, ins=1, outs=0)
+    def comment(self, text, x, y, w=None, h=22, tab=None, **kw):
+        return self.add("comment", x, y, w=w, h=h, text=text, ins=1, outs=0, tab=tab, **kw)
 
-    def param(self, maxclass, name, x, y, lo, hi, initial, w=44, h=48, short=None, enum=None, stored_only=False):
+    def param(self, maxclass, name, x, y, lo, hi, initial, w=44, h=48, short=None, enum=None, stored_only=False, tab=None, **extra):
         valueof = {"parameter_longname": name, "parameter_shortname": short or name,
                    "parameter_type": 1, "parameter_mmin": lo, "parameter_mmax": hi,
                    "parameter_initial": [initial], "parameter_initial_enable": 1}
@@ -175,11 +196,13 @@ class Patch:
             valueof["parameter_invisible"] = 1
         if enum:  # named choices, e.g. rates; the object outputs the choice's index
             valueof.update(parameter_type=2, parameter_enum=enum, parameter_mmax=len(enum) - 1)
-        return self.add(maxclass, x, y, w=w, h=h, ins=1, outs=2, parameter_enable=1,
-                        saved_attribute_attributes={"valueof": valueof})
+        elif maxclass == "live.text":
+            valueof.update(parameter_type=2, parameter_enum=["off", "on"], parameter_mmax=1)
+        return self.add(maxclass, x, y, w=w, h=h, ins=1, outs=2, parameter_enable=1, tab=tab,
+                        saved_attribute_attributes={"valueof": valueof}, **extra)
 
     def c(self, a, b, outlet=0, inlet=0):
-        self.lines.append({"patchline": {"source": [a, outlet], "destination": [b, inlet]}})
+        self.lines.append({"patchline": {"source": [a, outlet], "destination": [b, inlet], "hidden": 1}})
 
     def save_amxd(self, name, width):
         for entry in self.boxes:
@@ -235,7 +258,9 @@ def build_hub():
     Y = 220  # logic lives below the visible 169px device area
 
     # --- adapter + shared player table
-    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=13)
+    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=14)
+    thispatcher = P.obj("thispatcher", 4, Y + 1020, ins=1, outs=2)
+    P.c(adapter, thispatcher, 13, 0)
     preset_dials = P.obj("route 0 1 2 3", 1300, Y + 150, ins=2, outs=5)
     preset_menus = P.obj("route 0 1 2 3", 1300, Y + 180, ins=2, outs=5)
     P.c(adapter, preset_dials, 9); P.c(adapter, preset_menus, 10)
@@ -254,28 +279,19 @@ def build_hub():
     P.c(adapter, table, 0, 0); P.c(adapter, pending, 1); P.c(hub_in, adapter)
     P.c(table, shared_notes); P.c(shared_notes, bus)
 
-    # --- visible: one 2×2 block per Lane, then status/setup
-    P.comment("PF4 Hub", 4, 0, 60)
-    status = P.msg("Waiting for Voices", 380, 20)
-    P.c(adapter, status, 2)
-    P.comment("Reset every", 380, 48, 64)
-    reset = P.param("live.numbox", "Reset Bars", 446, 48, 0, 64, 0, w=40, h=18, short="Reset")
-    P.comment("bars (0 = off)", 488, 48, 80)
+    # --- Permanent Left Section (x = 0..275, y = 0..169)
+    # Global Controls: Reset
+    P.comment("Reset", 6, 12, 32)
+    reset = P.param("live.numbox", "Reset Bars", 42, 12, 0, 64, 0, w=30, h=18, short="Reset")
+    P.comment("bars", 76, 12, 28)
     reset_msg = P.obj("prepend reset", 700, Y - 30)
     P.c(reset, reset_msg); P.c(reset_msg, adapter)
-    # Voice Layout: the Split (how the four Voices are grouped); Lanes take the groups in order
-    P.comment("Voices", 380, 68, 64)
-    split = P.param("live.menu", "Split", 446, 68, 0, 0, 0, w=80, h=16, short="Split",
-                    enum=from_engine("Object.keys(engine.SPLITS)"))
-    to_split = P.obj("prepend split", 700, Y + 200)
-    P.c(split, to_split); P.c(to_split, adapter)
-    P.comment("Perfourmer setup: Play Mode M1 · synth ch 1–4 on MIDI ch 1–4 · "
-              "Edit 3 (aftertouch → cutoff) on", 380, 90, 190)
-    scale_readout = P.add("comment", 380, 140, w=190, h=18, text="Scale: –", ins=1, outs=0)
-    P.c(adapter, scale_readout, 6)
+
+    # Section header
+    P.comment("Pattern", 28, 32, 50)
+
+    # Captured Bases pattr (stored only)
     player_state = P.obj(f"dict {PLAYER_DICT}", 1500, Y, ins=2, outs=4)
-    # Captured Bases: a stored-only blob parameter, so they're saved with the set and with presets
-    # (a pattr's Parameter Mode is an object attribute: Max ignores parameter_enable on the box itself)
     stored = P.obj("pattr pf4_bases", 1500, Y + 60, ins=2, outs=3, varname="pf4_bases",
                    saved_object_attributes={"parameter_enable": 1},
                    saved_attribute_attributes={"valueof": {
@@ -283,10 +299,10 @@ def build_hub():
                        "parameter_type": 3, "parameter_invisible": 1}})
     to_bases = P.obj("prepend bases", 1500, Y + 90)
     P.c(adapter, stored, 7); P.c(stored, to_bases); P.c(to_bases, adapter)
-    # pattern view: one row of step glyphs per Lane, with the playhead
+
+    # Pattern and position routing
     patterns = P.obj("route 0 1 2 3", 1300, Y + 120, ins=2, outs=5)
     P.c(adapter, patterns, 8)
-    P.comment("Pattern (current Cycle)", 1452, 4, 200)
 
     # --- Live API (via the adapter): transport running/stopped and time signature
     here = P.obj("live.thisdevice", 1000, Y, ins=1, outs=3)
@@ -331,81 +347,165 @@ def build_hub():
     jumped = P.obj("sel 0", 700, Y + 130, ins=2, outs=2)
     P.c(contiguous, jumped); P.c(jumped, release_all)
 
+    # --- Tab Selector (x = 285, y = 4, w = 360, h = 20)
+    hub_tab = P.param("live.tab", "Hub Tab", 285, 4, 0, 5, 0, w=360, h=20, short="Tab",
+                      enum=["Rhythm", "Pitch", "Feel", "Evolve", "Timbre", "Voicing"])
+
+    # Tab Headers at y = 26
+    # Tab 1 (Pitch) headers
+    P.comment("Len", 306, 26, 24, tab=1)
+    P.comment("Pitch Cycle (scale degrees)", 336, 26, 175, tab=1)
+    P.comment("Trans", 525, 26, 32, tab=1)
+    P.comment("Oct", 560, 26, 30, tab=1)
+
+    # Tab 2 (Feel) headers
+    P.comment("Gate %", 325, 32, 48, tab=2)
+    P.comment("Velocity", 405, 32, 48, tab=2)
+    P.comment("Accent", 485, 32, 48, tab=2)
+
+    # Tab 3 (Evolve) headers
+    P.comment("Prob %", 310, 32, 36, tab=3)
+    P.comment("Mutate", 352, 32, 36, tab=3)
+    P.comment("Seed", 394, 32, 32, tab=3)
+    P.comment("Capture / Revert", 448, 32, 95, tab=3)
+    P.comment("Base", 550, 32, 40, tab=3)
+
+    # Tab 4 (Timbre) headers
+    P.comment("VCF Depth", 315, 32, 55, tab=4)
+    P.comment("VCF Bars", 375, 32, 55, tab=4)
+    P.comment("PWM Depth", 435, 32, 55, tab=4)
+    P.comment("PWM Bars", 495, 32, 55, tab=4)
+
+    # Tab 5 (Voicing) headers & section labels
+    P.comment("Voice Assignment", 316, 14, 95, tab=5)
+    P.comment("Playback Mode", 432, 14, 85, tab=5)
+    P.comment("Chord (Poly only)", 530, 14, 105, tab=5)
+
+    P.comment("V1", 318, 32, 18, tab=5)
+    P.comment("V2", 342, 32, 18, tab=5)
+    P.comment("V3", 366, 32, 18, tab=5)
+    P.comment("V4", 390, 32, 18, tab=5)
+    P.comment("Group Mode", 422, 32, 80, tab=5)
+    P.comment("Chord Shape", 530, 32, 90, tab=5)
+
     for n in range(LANES):
         hits_d, len_d, rot_d = LANE_DEFAULTS[n]
-        x = 4 + 94 * n
-        P.comment(f"Lane {n + 1}", x, 14, 60)
-        hits = P.param("live.dial", f"L{n + 1} Hits", x, 30, 0, len_d, hits_d, short="Hits")
-        length = P.param("live.dial", f"L{n + 1} Length", x + 46, 30, 1, 64, len_d, short="Length")
-        rotate = P.param("live.dial", f"L{n + 1} Rotate", x, 80, 0, 63, rot_d, short="Rotate")
-        rate = P.param("live.dial", f"L{n + 1} Rate", x + 46, 80, 0, 0, DEFAULT_RATE, short="Rate", enum=RATES)
-        readout = P.add("comment", x, 148, w=92, h=18, text="Cycle – · step –", ins=1, outs=0)
-        # Rhythm Preset menu: loads Hits, Length and Rotate (mappable, so the E16 can step through them)
-        menu = P.param("live.menu", f"L{n + 1} Rhythm", x, 130, 0, 0, 0, w=90, h=15, short="Rhythm", enum=presets)
-        to_rhythm = P.obj(f"prepend rhythm {n}", 200 + 300 * n, Y + 910)
+        row_y = 52 + 28 * n
+        ry = row_y   # row Y in permanent left section
+        ty = row_y   # row Y in tabbed section (tabs 1–4)
+        vy = row_y   # row Y in voicing tab (tab 5)
+        lx = 200 + 300 * n  # this Lane's logic column
+
+        # Permanent Left: Lane label & broad 252px Pattern glyphs (monospace Menlo 9.0pt, spaced, 16 steps/line)
+        P.comment(f"L{n + 1}", 6, ry + 3, 18)
+        initial_dots = " ".join(["·"] * min(16, len_d))
+        view = P.add("comment", 28, ry, w=252, h=20, text=initial_dots,
+                     fontname="Menlo", fontsize=9.0, ins=1, outs=0)
+        P.c(patterns, view, n)
+        if n < LANES - 1:
+            P.add("live.line", 6, ry + 25, w=268, h=2, ins=1, outs=0)
+
+        # --- Tab 0: Rhythm (4 columns side-by-side, 90px each)
+        rx = 285 + 90 * n
+        P.comment(f"Lane {n + 1}", rx, 26, 60, tab=0)
+        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, 0, len_d, hits_d, short="Hits", tab=0,
+                       varname=f"dial_L{n + 1}_hits")
+        length = P.param("live.dial", f"L{n + 1} Length", rx + 44, 42, 1, 32, len_d, short="Length", tab=0,
+                         varname=f"dial_L{n + 1}_len")
+        rotate = P.param("live.dial", f"L{n + 1} Rotate", rx, 92, 0, 31, rot_d, short="Rotate", tab=0,
+                         varname=f"dial_L{n + 1}_rot")
+        rate = P.param("live.dial", f"L{n + 1} Rate", rx + 44, 92, 0, 0, DEFAULT_RATE, short="Rate", enum=RATES, tab=0,
+                       varname=f"dial_L{n + 1}_rate")
+        menu = P.param("live.menu", f"L{n + 1} Rhythm", rx, 142, 0, 0, 0, w=88, h=16, short="Rhythm", enum=presets, tab=0,
+                       varname=f"menu_L{n + 1}_rhythm")
+        to_rhythm = P.obj(f"prepend rhythm {n}", lx, Y + 910)
         P.c(menu, to_rhythm); P.c(to_rhythm, adapter); P.c(preset_menus, menu, n)
-        dials = P.obj("unpack 0 0 0", 200 + 300 * n, Y + 940, ins=1, outs=3)  # right to left: Length, Rotate, Hits
+        dials = P.obj("unpack 0 0 0", lx, Y + 940, ins=1, outs=3)
         P.c(preset_dials, dials, n)
         P.c(dials, length, 2); P.c(dials, rotate, 1); P.c(dials, hits, 0)
-        P.c(readouts, readout, n)
 
-        # Pitch Cycle editor: one row per Lane — length, 8 degrees (steps past the length greyed out), transpose
+        # --- Tab 1: Pitch Cycle editor
         degrees, octave = PITCH_DEFAULTS[n]
-        py = 22 + 34 * n
-        P.comment(f"L{n + 1}", 580, py, 22)
-        plen = P.param("live.numbox", f"L{n + 1} Pitch Length", 602, py, 1, PITCH_STEPS, len(degrees),
-                       w=28, h=18, short="Len")
-        steps = [P.param("live.numbox", f"L{n + 1} Degree {i + 1}", 636 + 26 * i, py, -14, 14,
-                         degrees[i] if i < len(degrees) else 0, w=24, h=18, short=f"Deg {i + 1}")
+        P.comment(f"L{n + 1}", 285, ty, 20, tab=1)
+        plen = P.param("live.numbox", f"L{n + 1} Pitch Length", 306, ty, 1, PITCH_STEPS, len(degrees),
+                       w=26, h=18, short="Len", tab=1)
+        steps = [P.param("live.numbox", f"L{n + 1} Degree {i + 1}", 336 + 23 * i, ty, -14, 14,
+                         degrees[i] if i < len(degrees) else 0, w=22, h=18, short=f"Deg {i + 1}", tab=1)
                  for i in range(PITCH_STEPS)]
-        trans = P.param("live.numbox", f"L{n + 1} Transpose", 850, py, -7, 7, 0, w=30, h=18, short="Trans")
-        octv = P.param("live.numbox", f"L{n + 1} Octave", 884, py, -3, 3, octave, w=30, h=18, short="Oct")
-        # Articulation: Gate %, Velocity, Accent — heard from the next note
+        trans = P.param("live.numbox", f"L{n + 1} Transpose", 525, ty, -7, 7, 0, w=32, h=18, short="Trans", tab=1)
+        octv = P.param("live.numbox", f"L{n + 1} Octave", 560, ty, -3, 3, octave, w=32, h=18, short="Oct", tab=1)
+        py_l = Y + 700
+        initial = " ".join(str(degrees[i] if i < len(degrees) else 0) for i in range(PITCH_STEPS))
+        pitch = P.obj(f"pak {len(degrees)} {initial}", lx, py_l, ins=9)
+        to_pitch = P.obj(f"prepend pitch {n}", lx, py_l + 30)
+        P.c(plen, pitch, 0, 0); P.c(pitch, to_pitch); P.c(to_pitch, adapter)
+        for i, step in enumerate(steps):
+            P.c(step, pitch, 0, i + 1)
+            if i:
+                used = P.obj(f"expr $i1 > {i}", lx + 40 * (i % 4), py_l + 60 + 20 * (i // 4))
+                active = P.obj("prepend active", lx + 40 * (i % 4), py_l + 110 + 20 * (i // 4))
+                P.c(plen, used); P.c(used, active); P.c(active, step)
+        shift = P.obj(f"pak 0 {octave}", lx + 150, py_l, ins=2)
+        to_shift = P.obj(f"prepend transpose {n}", lx + 150, py_l + 30)
+        P.c(trans, shift, 0, 0); P.c(octv, shift, 0, 1); P.c(shift, to_shift); P.c(to_shift, adapter)
+
+        # --- Tab 2: Dynamics / Articulation (Feel)
         gate_d, vel_d, acc_d = ARTICULATION_DEFAULTS
-        if n == 0:
-            for label, ax in (("Len", 602), ("Pitch Cycle (scale degrees)", 636), ("Trans", 850), ("Oct", 884)):
-                P.comment(label, ax, 4, 140 if ax == 636 else 34)
-            for label, ax in (("Gate %", 972), ("Vel", 1008), ("Accent", 1044),
-                              ("Prob %", 1084), ("Mutate", 1120), ("Seed", 1156), ("Base", 1196),
-                              ("AT", 1296), ("AT bars", 1332), ("CC1", 1372), ("CC1 bars", 1408)):
-                P.comment(label, ax, 4, 34)
-        gate = P.param("live.numbox", f"L{n + 1} Gate", 972, py, 1, 100, gate_d, w=32, h=18, short="Gate %")
-        vel = P.param("live.numbox", f"L{n + 1} Velocity", 1008, py, 1, 127, vel_d, w=32, h=18, short="Vel")
-        acc = P.param("live.numbox", f"L{n + 1} Accent", 1044, py, 0, 127, acc_d, w=32, h=18, short="Accent")
-        lx = 200 + 300 * n  # this Lane's logic column
+        P.comment(f"L{n + 1}", 285, ty, 20, tab=2)
+        gate = P.param("live.numbox", f"L{n + 1} Gate", 325, ty, 1, 100, gate_d, w=48, h=18, short="Gate %", tab=2)
+        vel = P.param("live.numbox", f"L{n + 1} Velocity", 405, ty, 1, 127, vel_d, w=48, h=18, short="Vel", tab=2)
+        acc = P.param("live.numbox", f"L{n + 1} Accent", 485, ty, 0, 127, acc_d, w=48, h=18, short="Accent", tab=2)
         artic = P.obj(f"pak {gate_d} {vel_d} {acc_d}", lx, Y + 850, ins=3)
         to_artic = P.obj(f"prepend articulate {n}", lx, Y + 880)
         for i, box in enumerate((gate, vel, acc)):
             P.c(box, artic, 0, i)
         P.c(artic, to_artic); P.c(to_artic, adapter)
-        # Evolution: Probability, Mutation, Seed — from the next Cycle
+
+        # --- Tab 3: Evolution & Capture (Evolve)
         prob_d, mut_d = EVOLUTION_DEFAULTS
-        prob = P.param("live.numbox", f"L{n + 1} Probability", 1084, py, 0, 100, prob_d, w=32, h=18, short="Prob %")
-        mut = P.param("live.numbox", f"L{n + 1} Mutation", 1120, py, 0, 127, mut_d, w=32, h=18, short="Mutate")
-        seed = P.param("live.numbox", f"L{n + 1} Seed", 1156, py, 0, 999, n + 1, w=32, h=18, short="Seed",
-                       stored_only=True)
-        # dice under the Seed box: a new random Seed (0–999), exactly as if typed in
-        dice = P.add("live.text", 1156, py + 19, w=32, h=13, ins=1, outs=2, text="⚄", texton="⚄", mode=0,
-                     parameter_enable=1, saved_attribute_attributes={"valueof": {
+        P.comment(f"L{n + 1}", 285, ty, 20, tab=3)
+        prob = P.param("live.numbox", f"L{n + 1} Probability", 310, ty, 0, 100, prob_d, w=36, h=18, short="Prob %", tab=3)
+        mut = P.param("live.numbox", f"L{n + 1} Mutation", 352, ty, 0, 127, mut_d, w=36, h=18, short="Mutate", tab=3)
+        seed = P.param("live.numbox", f"L{n + 1} Seed", 394, ty, 0, 999, n + 1, w=32, h=18, short="Seed",
+                       stored_only=True, tab=3)
+        dice = P.add("live.text", 428, ty, w=18, h=18, ins=1, outs=2, text="⚄", texton="⚄", mode=0,
+                     parameter_enable=1, tab=3, fontsize=12.0, saved_attribute_attributes={"valueof": {
                          "parameter_longname": f"L{n + 1} New Seed", "parameter_shortname": "New Seed",
                          "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
         new_seed = P.obj("random 1000", lx + 200, Y + 820, ins=2)
-        P.c(dice, new_seed); P.c(new_seed, seed)  # a live.text button sends a bang, not 1
+        P.c(dice, new_seed); P.c(new_seed, seed)
         evo = P.obj(f"pak {prob_d} {mut_d} {n + 1}", lx + 150, Y + 850, ins=3)
         to_evo = P.obj(f"prepend evolve {n}", lx + 150, Y + 880)
         for i, box in enumerate((prob, mut, seed)):
             P.c(box, evo, 0, i)
         P.c(evo, to_evo); P.c(to_evo, adapter)
-        # Timbre LFOs: aftertouch (Perfourmer VCF cutoff) and CC1 (pulse width) to this Lane's Voice.
-        # value = depth × (1 − cos(2π · song position / period)) / 2: sweeps 0 … depth; depth 0 sends nothing
-        for k, (kind, label, ax, message) in enumerate((("at", "AT", 1296, "touch"), ("cc1", "CC1", 1372, "cc1"))):
-            depth = P.param("live.numbox", f"L{n + 1} {label} Depth", ax, py, 0, 127, 0, w=32, h=18,
-                            short=f"{label} Dep")
-            bars = P.param("live.numbox", f"L{n + 1} {label} Rate", ax + 36, py, 1, 128, LFO_DEFAULTS[n][k],
-                           w=32, h=18, short=f"{label} Bars")
+
+        capture_btn = P.add("live.text", 448, ty, w=48, h=18, ins=1, outs=2, text="Capture", texton="Capture", mode=0,
+                            parameter_enable=1, tab=3, saved_attribute_attributes={"valueof": {
+                                "parameter_longname": f"L{n + 1} Capture", "parameter_shortname": "Capture",
+                                "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
+        revert_btn = P.add("live.text", 500, ty, w=46, h=18, ins=1, outs=2, text="Revert", texton="Revert", mode=0,
+                           parameter_enable=1, tab=3, saved_attribute_attributes={"valueof": {
+                               "parameter_longname": f"L{n + 1} Revert", "parameter_shortname": "Revert",
+                               "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
+        cap_action = P.msg(f"capture {n}", lx + 230, Y + 880)
+        rev_action = P.msg(f"revert {n}", lx + 280, Y + 880)
+        P.c(capture_btn, cap_action); P.c(cap_action, adapter)
+        P.c(revert_btn, rev_action); P.c(rev_action, adapter)
+
+        base_readout = P.add("comment", 550, ty + 2, w=92, h=14, text="Euclidean", fontsize=9, ins=1, outs=0, tab=3)
+        P.c(readouts, base_readout, LANES + n)
+
+        # --- Tab 4: Timbre LFOs (VCF cutoff & PWM)
+        P.comment(f"L{n + 1}", 285, ty, 20, tab=4)
+        for k, (kind, label, ax, message) in enumerate((("vcf", "VCF", 315, "touch"), ("pwm", "PWM", 435, "cc1"))):
+            depth = P.param("live.numbox", f"L{n + 1} {label} Depth", ax, ty, 0, 127, 0, w=50, h=18,
+                            short=f"{label} Dep", tab=4)
+            bars = P.param("live.numbox", f"L{n + 1} {label} Rate", ax + 60, ty, 1, 128, LFO_DEFAULTS[n][k],
+                           w=50, h=18, short=f"{label} Bars", tab=4)
             lfo = P.obj("expr int($f2 * (0.5 - 0.5 * cos(6.2831853 * fmod($f1, $f3) / $f3)) + 0.5)",
                         1700 + 160 * (2 * n + k), Y + 100, ins=3)
-            period = P.obj("* 1920.", 1780 + 160 * (2 * n + k), Y + 70, ins=2)  # bars of four beats
+            period = P.obj("* 1920.", 1780 + 160 * (2 * n + k), Y + 70, ins=2)
             init_period = P.msg(str(LFO_DEFAULTS[n][k] * 1920), 1700 + 160 * (2 * n + k), Y + 70)
             changed = P.obj("change 0", 1700 + 160 * (2 * n + k), Y + 130, ins=2, outs=3)
             out = P.obj(f"prepend {message} {n + 1}", 1700 + 160 * (2 * n + k), Y + 160)
@@ -413,45 +513,25 @@ def build_hub():
             P.c(depth, lfo, 0, 1); P.c(bars, period); P.c(period, lfo, 0, 2)
             P.c(load, init_period); P.c(init_period, lfo, 0, 2)
             P.c(lfo, changed); P.c(changed, out); P.c(out, bus)
-        view = P.add("comment", 1452, py, w=400, h=18, text="·" * len_d, ins=1, outs=0)
-        # Voice Layout per Lane: Group Mode and Chord Shape (from the next Cycle), and the Voices it drives
-        if n == 0:
-            for label, gx in (("Group", 1860), ("Chord", 1944), ("Voices", 2028)):
-                P.comment(label, gx, 4, 60)
-        gm = P.param("live.menu", f"L{n + 1} Group Mode", 1860, py, 0, 0, 0, w=80, h=16, short="Group",
-                     enum=group_modes)
-        shape = P.param("live.menu", f"L{n + 1} Chord Shape", 1944, py, 0, 0, chord_shapes.index("triad"), w=80,
-                        h=16, short="Chord", enum=chord_shapes)
+
+        # --- Tab 5: Voicing (Voice Matrix, Group Mode, Chord Shape)
+        vy = 62 + 26 * n
+        P.comment(f"L{n + 1}", 285, vy + 2, 24, tab=5)
+        for v in (1, 2, 3, 4):
+            bx = 316 + 24 * (v - 1)
+            btn = P.param("live.text", f"L{n + 1} Voice {v}", bx, vy, 0, 1, 1 if n == v - 1 else 0,
+                          w=22, h=20, short=f"L{n + 1} V{v}", tab=5, varname=f"btn_L{n + 1}_V{v}",
+                          text=str(v), texton=str(v), mode=1)
+            to_voice = P.obj(f"prepend voice {n} {v}", lx + 20 * v, Y + 960)
+            P.c(btn, to_voice); P.c(to_voice, adapter)
+
+        gm = P.param("live.menu", f"L{n + 1} Group Mode", 422, vy + 2, 0, 0, 0, w=95, h=16, short="Group",
+                     enum=group_modes, tab=5, varname=f"menu_L{n + 1}_gm")
+        shape = P.param("live.menu", f"L{n + 1} Chord Shape", 525, vy + 2, 0, 0, chord_shapes.index("triad"), w=115,
+                        h=16, short="Chord", enum=chord_shapes, tab=5, varname=f"menu_L{n + 1}_chord")
         grouping = P.obj(f"pak 0 {chord_shapes.index('triad')}", lx + 150, Y + 910, ins=2)
         to_group = P.obj(f"prepend group {n}", lx + 150, Y + 940)
         P.c(gm, grouping, 0, 0); P.c(shape, grouping, 0, 1); P.c(grouping, to_group); P.c(to_group, adapter)
-        voices_shown = P.add("comment", 2028, py, w=70, h=18, text=f"V{n + 1}", ins=1, outs=0)
-        P.c(lane_voices, voices_shown, n)
-        P.c(patterns, view, n)
-        # Capture / Revert buttons
-        for label, bx in (("Capture", 1196), ("Revert", 1244)):
-            button = P.add("live.text", bx, py, w=44, h=18, ins=1, outs=2, text=label, texton=label, mode=0,
-                           parameter_enable=1, saved_attribute_attributes={"valueof": {
-                               "parameter_longname": f"L{n + 1} {label}", "parameter_shortname": label,
-                               "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
-            action = P.msg(f"{label.lower()} {n}", lx + 230 + 50 * (bx == 1244), Y + 880)
-            P.c(button, action); P.c(action, adapter)  # a live.text button sends a bang, not 1
-        base_readout = P.add("comment", 1196, py + 19, w=92, h=13, text="Base: Euclidean", fontsize=9, ins=1, outs=0)
-        P.c(readouts, base_readout, LANES + n)
-        py_l = Y + 700  # this Lane's pitch logic
-        initial = " ".join(str(degrees[i] if i < len(degrees) else 0) for i in range(PITCH_STEPS))
-        pitch = P.obj(f"pak {len(degrees)} {initial}", lx, py_l, ins=9)
-        to_pitch = P.obj(f"prepend pitch {n}", lx, py_l + 30)
-        P.c(plen, pitch, 0, 0); P.c(pitch, to_pitch); P.c(to_pitch, adapter)
-        for i, step in enumerate(steps):
-            P.c(step, pitch, 0, i + 1)
-            if i:  # steps beyond the Pitch Length are inactive
-                used = P.obj(f"expr $i1 > {i}", lx + 40 * (i % 4), py_l + 60 + 20 * (i // 4))
-                active = P.obj("prepend active", lx + 40 * (i % 4), py_l + 110 + 20 * (i // 4))
-                P.c(plen, used); P.c(used, active); P.c(active, step)
-        shift = P.obj(f"pak 0 {octave}", lx + 150, py_l, ins=2)
-        to_shift = P.obj(f"prepend transpose {n}", lx + 150, py_l + 30)
-        P.c(trans, shift, 0, 0); P.c(octv, shift, 0, 1); P.c(shift, to_shift); P.c(to_shift, adapter)
 
         ly = Y + 100
         # Hits range follows Length, so a full encoder sweep is always valid
@@ -543,7 +623,35 @@ def build_hub():
         # (no adoption on transport start: the playing bank already holds the Cycle at the song position, and a
         # bank still pending from before the stop would swap tables under a sounding note)
 
-    P.save_amxd("PF4 Hub.amxd", 2100)
+    # --- Tab Router Logic (v8.codebox)
+    tab_script = f"""
+const TABS = {json.dumps(P.tabs)};
+
+function msg_int(selectedTab) {{
+  for (let t = 0; t < 6; t++) {{
+    const hide = (t !== selectedTab) ? 1 : 0;
+    const list = TABS[t] || [];
+    for (let i = 0; i < list.length; i++) {{
+      const name = list[i];
+      const obj = this.patcher.getnamed(name);
+      if (obj) {{
+        obj.hidden = hide;
+      }}
+      if (this.patcher.message) {{
+        this.patcher.message("script", hide ? "hide" : "show", name);
+      }}
+    }}
+  }}
+}}
+
+function msg_float(f) {{
+  msg_int(Math.floor(f));
+}}
+"""
+    tab_router = P.codebox(tab_script, 285, Y - 30, ins=1, outs=0)
+    P.c(hub_tab, tab_router, 0, 0)
+
+    P.save_amxd("PF4 Hub.amxd", 650)
 
 
 def build_voice():

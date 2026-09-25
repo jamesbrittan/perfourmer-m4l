@@ -12,7 +12,7 @@
 // is playing: it withdraws the pending offer (after which the player can't switch) and reads the dict.
 autowatch = 1;
 inlets = 1;
-outlets = 13; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
+outlets = 14; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
 // switch at the next tick rather than the next Cycle boundary; release 1 = release the Lane's Voice on switching),
 // 2: Voice status text,
 // 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts (lanes 4–7: Base readouts),
@@ -38,12 +38,19 @@ const params = [
   { hits: 2, length: 5, rotate: 0, rate: "1/16", pitchCycle: [0, -3], transpose: 0, octave: -2, ...articulation },
   { hits: 7, length: 12, rotate: 0, rate: "1/16", pitchCycle: [4, 6, 7, 9, 11], transpose: 0, octave: 0, ...articulation },
 ].map((lane, n) => ({ ...lane, seed: n + 1 }));
+const matrix = [
+  [1, 0, 0, 0],
+  [0, 1, 0, 0],
+  [0, 0, 1, 0],
+  [0, 0, 0, 1],
+];
+
 const song = {
   resetBars: 0,
   ticksPerBar: 1920,
   scale: { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] },
-  split: "1+1+1+1",
-  previousSplit: "1+1+1+1",
+  voiceLayout: [[1], [2], [3], [4]],
+  previousVoiceLayout: [[1], [2], [3], [4]],
   splitAt: 0,
 };
 const writtenKeys = params.map(() => [[], []]);
@@ -144,23 +151,124 @@ function bases(...data) {
   for (let n = 0; n < LANES; n++) refresh(n);
 }
 
-// Voice Layout. Split (global menu index): while playing it takes effect at the next bar for every Lane (at least an
-// eighth note away), ending notes still sounding there; stopped, at once.
+// Split selection (for simulation/presets)
 function split(index) {
   const next = Object.keys(SPLITS)[index];
-  if (!next || next === song.split) return;
+  if (!next) return;
+  const layout = SPLITS[next];
+  for (let n = 0; n < LANES; n++) {
+    for (let v = 1; v <= 4; v++) {
+      const state = layout[n] && layout[n].includes(v) ? 1 : 0;
+      matrix[n][v - 1] = state;
+      outlet(13, "script", "send", `btn_L${n + 1}_V${v}`, state);
+    }
+  }
   const bar = song.ticksPerBar;
   let at = (Math.floor(polledAt / bar) + 1) * bar;
   if (at - polledAt < 240) at += bar;
-  // if an earlier change hasn't happened yet, the Split in effect is still its previous one
   const inEffect = playing && polledAt < song.splitAt ? song.previousSplit : song.split;
-  Object.assign(song, { previousSplit: playing ? inEffect : next, split: next, splitAt: playing ? at : 0 });
+  const inEffectLayout = playing && polledAt < song.splitAt ? song.previousVoiceLayout : song.voiceLayout;
+  Object.assign(song, {
+    previousSplit: playing ? inEffect : next,
+    split: next,
+    previousVoiceLayout: playing ? inEffectLayout : layout,
+    voiceLayout: layout,
+    splitAt: playing ? at : 0,
+  });
   engine.configure({ lanes: params, ...song });
   for (let n = 0; n < LANES; n++) {
-    if (playing) render(n, null, true); // the playing Cycle may already reach past the bar
+    if (playing) render(n, null, true);
     else refresh(n);
   }
   showLaneVoices();
+  updateMatrixActiveStates();
+}
+
+// Voice Matrix: click a button (lane 0..3, v 1..4, state 0/1)
+function voice(lane, v, state) {
+  lane = Number(lane);
+  v = Number(v);
+  state = Number(state);
+  if (matrix[lane][v - 1] === state) return;
+  if (state) {
+    for (let m = 0; m < LANES; m++) {
+      if (m !== lane && matrix[m][v - 1]) {
+        matrix[m][v - 1] = 0;
+        outlet(13, "script", "send", `btn_L${m + 1}_V${v}`, 0);
+      }
+    }
+    matrix[lane][v - 1] = 1;
+  } else {
+    matrix[lane][v - 1] = 0;
+  }
+  applyVoiceLayout();
+}
+
+function applyVoiceLayout() {
+  const newLayout = [0, 1, 2, 3].map((n) =>
+    [1, 2, 3, 4].filter((v) => matrix[n][v - 1] === 1)
+  );
+  const bar = song.ticksPerBar;
+  let at = (Math.floor(polledAt / bar) + 1) * bar;
+  if (at - polledAt < 240) at += bar;
+  const inEffect = playing && polledAt < song.splitAt ? (song.previousVoiceLayout || song.voiceLayout) : song.voiceLayout;
+  Object.assign(song, {
+    previousVoiceLayout: playing ? inEffect : newLayout,
+    voiceLayout: newLayout,
+    splitAt: playing ? at : 0,
+  });
+  engine.configure({ lanes: params, ...song });
+  for (let n = 0; n < LANES; n++) {
+    if (playing) render(n, null, true);
+    else refresh(n);
+  }
+  showLaneVoices();
+  updateMatrixActiveStates();
+}
+
+function updateMatrixActiveStates() {
+  for (let n = 0; n < LANES; n++) {
+    const count = (song.voiceLayout[n] || []).length;
+    const mode = params[n].groupMode || "poly";
+    const gmActive = count > 0 ? 1 : 0;
+    const chordActive = (count > 0 && mode === "poly") ? 1 : 0;
+
+    const gmName = `menu_L${n + 1}_gm`;
+    const chordName = `menu_L${n + 1}_chord`;
+
+    // Send active state to object inlet (visual dimming)
+    outlet(13, "script", "send", gmName, "active", gmActive);
+    outlet(13, "script", "send", chordName, "active", chordActive);
+
+    // Send ignoreclick attribute to box (strictly disables mouse clicks)
+    outlet(13, "script", "sendbox", gmName, "ignoreclick", gmActive ? 0 : 1);
+    outlet(13, "script", "sendbox", chordName, "ignoreclick", chordActive ? 0 : 1);
+
+    // Rhythm view: grey out (active 0) if count === 0, but keep clickable (no ignoreclick)
+    outlet(13, "script", "send", `dial_L${n + 1}_hits`, "active", gmActive);
+    outlet(13, "script", "send", `dial_L${n + 1}_len`, "active", gmActive);
+    outlet(13, "script", "send", `dial_L${n + 1}_rot`, "active", gmActive);
+    outlet(13, "script", "send", `dial_L${n + 1}_rate`, "active", gmActive);
+    outlet(13, "script", "send", `menu_L${n + 1}_rhythm`, "active", gmActive);
+
+    // Direct JS patcher access if available
+    if (typeof this !== "undefined" && this.patcher && this.patcher.getnamed) {
+      const gmObj = this.patcher.getnamed(gmName);
+      if (gmObj) {
+        gmObj.ignoreclick = gmActive ? 0 : 1;
+        if (gmObj.message) gmObj.message("active", gmActive);
+      }
+      const chordObj = this.patcher.getnamed(chordName);
+      if (chordObj) {
+        chordObj.ignoreclick = chordActive ? 0 : 1;
+        if (chordObj.message) chordObj.message("active", chordActive);
+      }
+      for (const name of [`dial_L${n + 1}_hits`, `dial_L${n + 1}_len`, `dial_L${n + 1}_rot`, `dial_L${n + 1}_rate`, `menu_L${n + 1}_rhythm`]) {
+        const obj = this.patcher.getnamed(name);
+        if (obj && obj.message) obj.message("active", gmActive);
+      }
+    }
+  }
 }
 
 // Group Mode and Chord Shape (menu indices): from the Lane's next Cycle
@@ -168,15 +276,18 @@ function group(n, modeIndex, shapeIndex) {
   Object.assign(params[n], { groupMode: GROUP_MODES[modeIndex], chordShape: Object.keys(CHORD_SHAPES)[shapeIndex] });
   refresh(n);
   showLaneVoices();
+  updateMatrixActiveStates();
 }
 
 function showLaneVoices() {
   for (let n = 0; n < LANES; n++) {
-    const reach = [...new Set([...(SPLITS[song.previousSplit][n] || []), ...(SPLITS[song.split][n] || [])])];
+    const prev = song.previousVoiceLayout ? song.previousVoiceLayout[n] || [] : [];
+    const curr = song.voiceLayout ? song.voiceLayout[n] || [] : [];
+    const reach = [...new Set([...prev, ...curr])];
     outlet(12, n, ...reach);
-    const voices = SPLITS[song.split][n] || [];
+    const voices = curr;
     const mode = voices.length > 1 ? ` ${params[n].groupMode || "poly"}` : "";
-    const text = !voices.length ? "no Voices" : voices.length === 1 ? `V${voices[0]}` : `V${voices[0]}–${voices[voices.length - 1]}${mode}`;
+    const text = !voices.length ? "off" : voices.length === 1 ? `V${voices[0]}` : `V${voices.join("+")}${mode}`;
     outlet(11, n, "set", text);
   }
 }
@@ -302,6 +413,7 @@ function bang() {
   sendReset();
   showVoices();
   showLaneVoices();
+  updateMatrixActiveStates();
 }
 
 // now: replace the playing Cycle from the player's next tick, instead of waiting for its next Cycle boundary
@@ -355,8 +467,8 @@ function follow(n, cycleIndex) {
 // song position (polled a few times a second): show where each Lane is, from the engine's own locate()
 function where(songTicks) {
   polledAt = songTicks;
-  if (song.previousSplit !== song.split && playing && songTicks >= song.splitAt + song.ticksPerBar) {
-    song.previousSplit = song.split; // the change is well past: its old groups no longer need releasing
+  if (song.previousVoiceLayout && playing && songTicks >= song.splitAt + song.ticksPerBar) {
+    song.previousVoiceLayout = song.voiceLayout;
     engine.configure({ lanes: params, ...song });
     showLaneVoices();
   }
@@ -367,18 +479,26 @@ function where(songTicks) {
     const mutated = engine.isMutated(n, cycleIndex) ? " · mutated" : "";
     outlet(4, n, "set", `Cycle ${cycleIndex + 1} · step ${step}/${params[n].length}${mutated}`);
     const depth = engine.captureDepth(n);
-    outlet(4, LANES + n, "set", depth ? `Base: captured${depth > 1 ? ` ×${depth}` : ""}` : "Base: Euclidean");
+    outlet(4, LANES + n, "set", depth ? `captured${depth > 1 ? ` ×${depth}` : ""}` : "Euclidean");
     // pattern view: ● hit, · rest; the playhead step shows as ◉ (hit) or ○ (rest)
     const view = engine.hitSteps(n, cycleIndex).map((hit, i) => (i === step - 1 ? (hit ? "◉" : "○") : hit ? "●" : "·"));
-    outlet(8, n, "set", view.join(""));
+    const lines = [];
+    for (let i = 0; i < view.length; i += 16) {
+      lines.push(view.slice(i, i + 16).join(" "));
+    }
+    outlet(8, n, "set", lines.join("\n"));
   }
 }
 
 function showVoices() {
   const { connected, duplicates } = engine.voiceStatus();
   const missing = [1, 2, 3, 4].filter((voice) => !connected.includes(voice));
-  let text = connected.length ? `Voices ${connected.join(" ")}` : "No Voices connected";
-  if (missing.length) text += ` · missing ${missing.join(" ")}`;
-  if (duplicates.length) text += ` · DUPLICATE ${duplicates.join(" ")}`;
+  let text = "";
+  if (!connected.length) {
+    text = "Waiting for Voices";
+  } else if (missing.length || duplicates.length) {
+    text = missing.length ? `Missing Voice ${missing.join(" ")}` : "";
+    if (duplicates.length) text += `${text ? " · " : ""}Duplicate Voice ${duplicates.join(" ")}`;
+  }
   outlet(2, "set", text);
 }
