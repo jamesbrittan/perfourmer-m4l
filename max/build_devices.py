@@ -40,10 +40,6 @@ HELP = {
                   "Edit 3 on). 0 = no aftertouch sent."),
     "VCF Rate": ("VCF Rate", "Length of one VCF sweep, in bars of four beats. Follows song position, "
                  "so it replays the same way."),
-    "Voice 1": ("Voice 1", "Assigns Perfourmer Voice 1 to this Lane (each Voice can belong to at most one Lane)."),
-    "Voice 2": ("Voice 2", "Assigns Perfourmer Voice 2 to this Lane (each Voice can belong to at most one Lane)."),
-    "Voice 3": ("Voice 3", "Assigns Perfourmer Voice 3 to this Lane (each Voice can belong to at most one Lane)."),
-    "Voice 4": ("Voice 4", "Assigns Perfourmer Voice 4 to this Lane (each Voice can belong to at most one Lane)."),
     "PWM Depth": ("PWM Depth", "How far the Lane's CC1 LFO sweeps (the Perfourmer's pulse width). 0 = no CC1 "
                   "sent."),
     "PWM Rate": ("PWM Rate", "Length of one PWM sweep, in bars of four beats. Follows song position."),
