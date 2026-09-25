@@ -21,12 +21,23 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var index_exports = {};
 __export(index_exports, {
   CHORD_SHAPES: () => CHORD_SHAPES,
+  CONTROL_NAMES: () => CONTROL_NAMES,
   GROUP_MODES: () => GROUP_MODES,
+  HUB_OUTLETS: () => HUB_OUTLETS,
+  LANES: () => LANES,
+  LANE_DEFAULTS: () => LANE_DEFAULTS,
+  PITCH_STEPS: () => PITCH_STEPS,
+  PLAYER: () => PLAYER,
+  PLAYER_POSITION: () => PLAYER_POSITION,
+  RANGES: () => RANGES,
   RATES: () => RATES,
   RHYTHM_PRESETS: () => RHYTHM_PRESETS,
   SPLITS: () => SPLITS,
+  VOICES: () => VOICES,
+  controlName: () => controlName,
   createEngine: () => createEngine,
-  createScheduler: () => createScheduler
+  createScheduler: () => createScheduler,
+  inRange: () => inRange
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -197,6 +208,96 @@ var XoroShiro128Plus = class XoroShiro128Plus2 {
 };
 function xoroshiro128plus(seed) {
   return new XoroShiro128Plus(-1, ~seed, seed | 0, 0);
+}
+
+// src/device.ts
+var LANES = 4;
+var VOICES = 4;
+var PITCH_STEPS = 8;
+var PLAYER = { gridTicks: 2, bankSize: 1e4, noReset: 1e12, dict: "pf4.player" };
+var PLAYER_POSITION = "fmod(fmod($f1,$f3),$f2)";
+var RANGES = {
+  hits: [0, 32],
+  length: [1, 32],
+  rotate: [0, 31],
+  degree: [-14, 14],
+  transpose: [-7, 7],
+  octave: [-3, 3],
+  gate: [1, 100],
+  velocity: [1, 127],
+  accent: [0, 127],
+  probability: [0, 100],
+  mutation: [0, 127],
+  seed: [0, 999]
+};
+var LANE_DEFAULTS = [
+  { hits: 5, length: 8, pitchCycle: [0, 4, 2, 5], octave: 0 },
+  { hits: 3, length: 8, pitchCycle: [0, 2, 4], octave: -1 },
+  { hits: 2, length: 5, pitchCycle: [0, -3], octave: -2 },
+  { hits: 7, length: 12, pitchCycle: [4, 6, 7, 9, 11], octave: 0 }
+].map((lane, n) => ({
+  rotate: 0,
+  rate: "1/16",
+  transpose: 0,
+  gate: 50,
+  velocity: 100,
+  accent: 0,
+  probability: 100,
+  mutation: 0,
+  seed: n + 1,
+  groupMode: "poly",
+  chordShape: "triad",
+  ...lane
+}));
+var HUB_OUTLETS = {
+  table: 0,
+  // player table edits
+  pending: 1,
+  // "<lane> <bank> <cycleTicks> <now> <release>" offers
+  voiceStatus: 2,
+  resetPeriod: 3,
+  // in ticks, PLAYER.noReset when off
+  readouts: 4,
+  // "<lane> set <text>": 0–3 positions, 4–7 Bases
+  transport: 5,
+  // 1 running, 0 stopped
+  scale: 6,
+  bases: 7,
+  // Captured Bases, to the stored-only pattr
+  patterns: 8,
+  // "<lane> set <text>" pattern view
+  presetDials: 9,
+  // "<lane> <hits> <rotate> <length>" from a Rhythm Preset
+  presetMenus: 10,
+  // "<lane> set 0": the Rhythm Preset menu back to "—"
+  laneVoices: 11,
+  // "<lane> set <text>"
+  releaseVoices: 12,
+  // "<lane> <voice> …" the Voices the player releases for that Lane
+  script: 13
+  // scripting messages to thispatcher
+};
+var CONTROL_NAMES = {
+  voiceButton: "btn_L{lane}_V{voice}",
+  groupMode: "menu_L{lane}_gm",
+  chordShape: "menu_L{lane}_chord",
+  hits: "dial_L{lane}_hits",
+  length: "dial_L{lane}_len",
+  rotate: "dial_L{lane}_rot",
+  rate: "dial_L{lane}_rate",
+  rhythm: "menu_L{lane}_rhythm"
+};
+var controlName = (kind, lane, voice = 0) => CONTROL_NAMES[kind].replace("{lane}", String(lane)).replace("{voice}", String(voice));
+var clamp = (value, [lo, hi]) => Math.max(lo, Math.min(hi, value));
+function inRange(lane) {
+  const out = { ...lane };
+  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "seed"])
+    if (typeof out[key] === "number") out[key] = clamp(out[key], RANGES[key]);
+  if (out.pitchCycle) {
+    const degrees = out.pitchCycle.slice(0, PITCH_STEPS).map((d) => clamp(d, RANGES.degree));
+    out.pitchCycle = degrees.length ? degrees : [0];
+  }
+  return out;
 }
 
 // src/scheduler.ts
@@ -602,9 +703,10 @@ function createEngine() {
     return cycleTable(lane, gridTicks, cycleIndex).slots;
   }
   return {
-    /** Replace every setting: the Lanes, and the song settings (anything left out takes its default). */
+    /** Replace every setting: the Lanes, and the song settings (anything left out takes its default). Lane
+     * settings are brought inside the control ranges (RANGES), here and in setLane. */
     configure(config) {
-      lanes = config.lanes.map((lane) => ({ ...lane }));
+      lanes = config.lanes.map((lane) => inRange(lane));
       scale = config.scale ?? C_MAJOR;
       ticksPerBar = config.ticksPerBar ?? 1920;
       resetTicks = (config.resetBars ?? 0) * ticksPerBar;
@@ -613,7 +715,7 @@ function createEngine() {
     },
     /** Change some of a Lane's settings, keeping the rest. */
     setLane(lane, change) {
-      lanes[lane] = { ...lanes[lane], ...change };
+      lanes[lane] = { ...lanes[lane], ...inRange(change) };
       settingsChanged();
     },
     /** Change some of the song settings, keeping the rest. */

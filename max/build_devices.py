@@ -10,8 +10,6 @@ inlined, pf4-voice.js) are embedded in v8.codebox objects, so the .amxd files ne
 import glob, json, os, re, struct, subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-GRID_TICKS = 2  # player resolution; must match GRID_TICKS in pf4-hub.js
-BANK_SIZE = 10000  # must match BANK_SIZE in pf4-hub.js
 VOICE_BUS = "pf4.voice"
 
 
@@ -234,24 +232,40 @@ class Patch:
             f.write(header + body)
 
 
-LANES = 4
-LANE_DEFAULTS = [(5, 8, 0), (3, 8, 0), (2, 5, 0), (7, 12, 0)]  # must match params in pf4-hub.js
-PITCH_DEFAULTS = [([0, 4, 2, 5], 0), ([0, 2, 4], -1), ([0, -3], -2), ([4, 6, 7, 9, 11], 0)]  # (Pitch Cycle, octave)
-PITCH_STEPS = 8
-ARTICULATION_DEFAULTS = (50, 100, 0)  # Gate %, Velocity, Accent; must match pf4-hub.js
-LFO_DEFAULTS = [(7, 5), (11, 9), (13, 15), (17, 19)]  # per Lane: (AT rate, CC1 rate) in bars; depths default to 0 (off)
-LFO_UPDATE_MS = 40  # LFO sampling; only changed values are sent, so the MIDI port isn't flooded
-EVOLUTION_DEFAULTS = (100, 0)  # Probability %, Mutation; the seed defaults to the Lane number (pf4-hub.js)
-PLAYER_DICT = "pf4.player"  # each Lane's playing bank, read by the adapter (pf4-hub.js)
-RATES = ["1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16Q", "1/16T", "1/16S", "1/32", "1/32Q"]  # = engine RATES
-DEFAULT_RATE = RATES.index("1/16")
-NEVER = 1e12  # "no Reset" period, as in pf4-hub.js
-
-
 def from_engine(expression):
     """A value from the built engine bundle (e.g. menu choices), so the devices can't drift from the engine."""
     script = f'const engine = require("./pf4-engine.js"); console.log(JSON.stringify({expression}))'
     return json.loads(subprocess.check_output(["node", "-e", script], cwd=HERE))
+
+
+# Facts shared with the engine and the Hub script, defined once in the engine (its device module)
+SHARED = from_engine("{LANES: engine.LANES, VOICES: engine.VOICES, PITCH_STEPS: engine.PITCH_STEPS, "
+                     "PLAYER: engine.PLAYER, PLAYER_POSITION: engine.PLAYER_POSITION, RANGES: engine.RANGES, "
+                     "LANE_DEFAULTS: engine.LANE_DEFAULTS, OUT: engine.HUB_OUTLETS, NAMES: engine.CONTROL_NAMES, "
+                     "RATES: engine.RATES}")
+LANES, VOICES, PITCH_STEPS = SHARED["LANES"], SHARED["VOICES"], SHARED["PITCH_STEPS"]
+GRID_TICKS = SHARED["PLAYER"]["gridTicks"]  # player resolution
+BANK_SIZE = SHARED["PLAYER"]["bankSize"]  # table key = (lane * 2 + bank) * BANK_SIZE + slot
+NEVER = SHARED["PLAYER"]["noReset"]  # "no Reset" period
+PLAYER_DICT = SHARED["PLAYER"]["dict"]  # each Lane's playing bank, read by the Hub script
+RANGES = SHARED["RANGES"]
+DEFAULTS = SHARED["LANE_DEFAULTS"]  # each Lane's settings in a new Hub
+OUT = SHARED["OUT"]  # the Hub script's outlets
+RATES = SHARED["RATES"]
+LFO_DEFAULTS = [(7, 5), (11, 9), (13, 15), (17, 19)]  # per Lane: (AT rate, CC1 rate) in bars; depths default to 0 (off)
+LFO_UPDATE_MS = 40  # LFO sampling; only changed values are sent, so the MIDI port isn't flooded
+
+
+def name(kind, lane, voice=0):
+    """Scripting name of a control the Hub script addresses (lane and voice count from 1)."""
+    return SHARED["NAMES"][kind].format(lane=lane, voice=voice)
+
+
+def lanes_route():
+    """route by Lane number: one outlet per Lane (and one for anything else)."""
+    return "route " + " ".join(str(n) for n in range(LANES))
+
+
 HUB_BUS = "pf4.hub"
 
 
@@ -260,25 +274,25 @@ def build_hub():
     Y = 220  # logic lives below the visible 169px device area
 
     # --- adapter + shared player table
-    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=14)
+    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=len(OUT))
     thispatcher = P.obj("thispatcher", 4, Y + 1020, ins=1, outs=2)
-    P.c(adapter, thispatcher, 13, 0)
-    preset_dials = P.obj("route 0 1 2 3", 1300, Y + 150, ins=2, outs=5)
-    preset_menus = P.obj("route 0 1 2 3", 1300, Y + 180, ins=2, outs=5)
-    P.c(adapter, preset_dials, 9); P.c(adapter, preset_menus, 10)
+    P.c(adapter, thispatcher, OUT["script"], 0)
+    preset_dials = P.obj(lanes_route(), 1300, Y + 150, ins=2, outs=LANES + 1)
+    preset_menus = P.obj(lanes_route(), 1300, Y + 180, ins=2, outs=LANES + 1)
+    P.c(adapter, preset_dials, OUT["presetDials"]); P.c(adapter, preset_menus, OUT["presetMenus"])
     presets = ["—"] + from_engine("engine.RHYTHM_PRESETS.map((p) => p.name)")
     group_modes = from_engine("engine.GROUP_MODES")
     chord_shapes = from_engine("Object.keys(engine.CHORD_SHAPES)")
-    lane_voices = P.obj("route 0 1 2 3", 1300, Y + 210, ins=2, outs=5)
-    P.c(adapter, lane_voices, 11)
-    release_reach = P.obj("route 0 1 2 3", 1300, Y + 240, ins=2, outs=5)
-    P.c(adapter, release_reach, 12)
+    lane_voices = P.obj(lanes_route(), 1300, Y + 210, ins=2, outs=LANES + 1)
+    P.c(adapter, lane_voices, OUT["laneVoices"])
+    release_reach = P.obj(lanes_route(), 1300, Y + 240, ins=2, outs=LANES + 1)
+    P.c(adapter, release_reach, OUT["releaseVoices"])
     table = P.obj("coll", 4, Y + 40, ins=1, outs=4)
     shared_notes = P.obj("zl iter 3", 4, Y + 80, ins=2, outs=2)
-    pending = P.obj("route 0 1 2 3", 200, Y + 40, ins=2, outs=5)
+    pending = P.obj(lanes_route(), 200, Y + 40, ins=2, outs=LANES + 1)
     bus = P.obj(f"send {VOICE_BUS}", 4, Y + 700)
     hub_in = P.obj(f"receive {HUB_BUS}", 200, Y - 30, ins=0)
-    P.c(adapter, table, 0, 0); P.c(adapter, pending, 1); P.c(hub_in, adapter)
+    P.c(adapter, table, OUT["table"], 0); P.c(adapter, pending, OUT["pending"]); P.c(hub_in, adapter)
     P.c(table, shared_notes); P.c(shared_notes, bus)
 
     # --- Permanent Left Section (x = 0..275, y = 0..169)
@@ -300,11 +314,11 @@ def build_hub():
                        "parameter_longname": "Captured Bases", "parameter_shortname": "Bases",
                        "parameter_type": 3, "parameter_invisible": 1}})
     to_bases = P.obj("prepend bases", 1500, Y + 90)
-    P.c(adapter, stored, 7); P.c(stored, to_bases); P.c(to_bases, adapter)
+    P.c(adapter, stored, OUT["bases"]); P.c(stored, to_bases); P.c(to_bases, adapter)
 
     # Pattern and position routing
-    patterns = P.obj("route 0 1 2 3", 1300, Y + 120, ins=2, outs=5)
-    P.c(adapter, patterns, 8)
+    patterns = P.obj(lanes_route(), 1300, Y + 120, ins=2, outs=LANES + 1)
+    P.c(adapter, patterns, OUT["patterns"])
 
     # --- Live API (via the adapter): transport running/stopped and time signature
     here = P.obj("live.thisdevice", 1000, Y, ins=1, outs=3)
@@ -314,9 +328,9 @@ def build_hub():
     rollcall = P.msg("rollcall", 1100, Y + 30)
     load = P.obj("loadbang", 1200, Y)
     P.c(here, observe); P.c(observe, adapter)
-    P.c(adapter, started, 5)
+    P.c(adapter, started, OUT["transport"])
     stopped_now = P.obj("== 0", 1100, Y + 90, ins=2)  # 1 while the transport is stopped
-    P.c(adapter, stopped_now, 5)
+    P.c(adapter, stopped_now, OUT["transport"])
     P.c(started, release_all, 0); P.c(release_all, bus)
     late_release = P.obj("delay 50", 1100, Y + 150, ins=2)   # catch any straggler after the stop
     P.c(started, late_release, 0); P.c(late_release, release_all)
@@ -325,8 +339,8 @@ def build_hub():
     poll = P.obj("metro 100 @active 1", 1300, Y, ins=2)
     poll_pos = P.obj("transport", 1300, Y + 30, ins=2, outs=9)
     where = P.obj("prepend where", 1300, Y + 60)
-    readouts = P.obj("route 0 1 2 3 4 5 6 7", 1300, Y + 90, ins=2, outs=9)  # 0–3 positions, 4–7 Bases
-    P.c(poll, poll_pos); P.c(poll_pos, where, 7); P.c(where, adapter); P.c(adapter, readouts, 4)
+    readouts = P.obj("route " + " ".join(str(n) for n in range(2 * LANES)), 1300, Y + 90, ins=2, outs=2 * LANES + 1)  # 0–3 positions, 4–7 Bases
+    P.c(poll, poll_pos); P.c(poll_pos, where, 7); P.c(where, adapter); P.c(adapter, readouts, OUT["readouts"])
     P.c(load, adapter)                               # render every Lane once
 
     # --- clock: fine tick grid (ticket 01 verdict), fanned out to every Lane
@@ -387,7 +401,9 @@ def build_hub():
     P.comment("Chord Shape", 530, 32, 90, tab=5)
 
     for n in range(LANES):
-        hits_d, len_d, rot_d = LANE_DEFAULTS[n]
+        d = DEFAULTS[n]
+        hits_d, len_d, rot_d, rate_d = d["hits"], d["length"], d["rotate"], RATES.index(d["rate"])
+        R = RANGES
         row_y = 52 + 28 * n
         ry = row_y   # row Y in permanent left section
         ty = row_y   # row Y in tabbed section (tabs 1–4)
@@ -407,16 +423,16 @@ def build_hub():
         # --- Tab 0: Rhythm (4 columns side-by-side, 90px each)
         rx = 285 + 90 * n
         P.comment(f"Lane {n + 1}", rx, 26, 60, tab=0)
-        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, 0, len_d, hits_d, short="Hits", tab=0,
-                       varname=f"dial_L{n + 1}_hits")
-        length = P.param("live.dial", f"L{n + 1} Length", rx + 44, 42, 1, 32, len_d, short="Length", tab=0,
-                         varname=f"dial_L{n + 1}_len")
-        rotate = P.param("live.dial", f"L{n + 1} Rotate", rx, 92, 0, 31, rot_d, short="Rotate", tab=0,
-                         varname=f"dial_L{n + 1}_rot")
-        rate = P.param("live.dial", f"L{n + 1} Rate", rx + 44, 92, 0, 0, DEFAULT_RATE, short="Rate", enum=RATES, tab=0,
-                       varname=f"dial_L{n + 1}_rate")
+        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, R["hits"][0], len_d, hits_d, short="Hits", tab=0,
+                       varname=name("hits", n + 1))
+        length = P.param("live.dial", f"L{n + 1} Length", rx + 44, 42, *R["length"], len_d, short="Length", tab=0,
+                         varname=name("length", n + 1))
+        rotate = P.param("live.dial", f"L{n + 1} Rotate", rx, 92, *R["rotate"], rot_d, short="Rotate", tab=0,
+                         varname=name("rotate", n + 1))
+        rate = P.param("live.dial", f"L{n + 1} Rate", rx + 44, 92, 0, 0, rate_d, short="Rate", enum=RATES, tab=0,
+                       varname=name("rate", n + 1))
         menu = P.param("live.menu", f"L{n + 1} Rhythm", rx, 142, 0, 0, 0, w=88, h=16, short="Rhythm", enum=presets, tab=0,
-                       varname=f"menu_L{n + 1}_rhythm")
+                       varname=name("rhythm", n + 1))
         to_rhythm = P.obj(f"prepend rhythm {n}", lx, Y + 910)
         P.c(menu, to_rhythm); P.c(to_rhythm, adapter); P.c(preset_menus, menu, n)
         dials = P.obj("unpack 0 0 0", lx, Y + 940, ins=1, outs=3)
@@ -424,15 +440,15 @@ def build_hub():
         P.c(dials, length, 2); P.c(dials, rotate, 1); P.c(dials, hits, 0)
 
         # --- Tab 1: Pitch Cycle editor
-        degrees, octave = PITCH_DEFAULTS[n]
+        degrees, octave = d["pitchCycle"], d["octave"]
         P.comment(f"L{n + 1}", 285, ty, 20, tab=1)
         plen = P.param("live.numbox", f"L{n + 1} Pitch Length", 306, ty, 1, PITCH_STEPS, len(degrees),
                        w=26, h=18, short="Len", tab=1)
-        steps = [P.param("live.numbox", f"L{n + 1} Degree {i + 1}", 336 + 23 * i, ty, -14, 14,
+        steps = [P.param("live.numbox", f"L{n + 1} Degree {i + 1}", 336 + 23 * i, ty, *R["degree"],
                          degrees[i] if i < len(degrees) else 0, w=22, h=18, short=f"Deg {i + 1}", tab=1)
                  for i in range(PITCH_STEPS)]
-        trans = P.param("live.numbox", f"L{n + 1} Transpose", 525, ty, -7, 7, 0, w=32, h=18, short="Trans", tab=1)
-        octv = P.param("live.numbox", f"L{n + 1} Octave", 560, ty, -3, 3, octave, w=32, h=18, short="Oct", tab=1)
+        trans = P.param("live.numbox", f"L{n + 1} Transpose", 525, ty, *R["transpose"], d["transpose"], w=32, h=18, short="Trans", tab=1)
+        octv = P.param("live.numbox", f"L{n + 1} Octave", 560, ty, *R["octave"], octave, w=32, h=18, short="Oct", tab=1)
         py_l = Y + 700
         initial = " ".join(str(degrees[i] if i < len(degrees) else 0) for i in range(PITCH_STEPS))
         pitch = P.obj(f"pak {len(degrees)} {initial}", lx, py_l, ins=9)
@@ -449,11 +465,11 @@ def build_hub():
         P.c(trans, shift, 0, 0); P.c(octv, shift, 0, 1); P.c(shift, to_shift); P.c(to_shift, adapter)
 
         # --- Tab 2: Dynamics / Articulation (Feel)
-        gate_d, vel_d, acc_d = ARTICULATION_DEFAULTS
+        gate_d, vel_d, acc_d = d["gate"], d["velocity"], d["accent"]
         P.comment(f"L{n + 1}", 285, ty, 20, tab=2)
-        gate = P.param("live.numbox", f"L{n + 1} Gate", 325, ty, 1, 100, gate_d, w=48, h=18, short="Gate %", tab=2)
-        vel = P.param("live.numbox", f"L{n + 1} Velocity", 405, ty, 1, 127, vel_d, w=48, h=18, short="Vel", tab=2)
-        acc = P.param("live.numbox", f"L{n + 1} Accent", 485, ty, 0, 127, acc_d, w=48, h=18, short="Accent", tab=2)
+        gate = P.param("live.numbox", f"L{n + 1} Gate", 325, ty, *R["gate"], gate_d, w=48, h=18, short="Gate %", tab=2)
+        vel = P.param("live.numbox", f"L{n + 1} Velocity", 405, ty, *R["velocity"], vel_d, w=48, h=18, short="Vel", tab=2)
+        acc = P.param("live.numbox", f"L{n + 1} Accent", 485, ty, *R["accent"], acc_d, w=48, h=18, short="Accent", tab=2)
         artic = P.obj(f"pak {gate_d} {vel_d} {acc_d}", lx, Y + 850, ins=3)
         to_artic = P.obj(f"prepend articulate {n}", lx, Y + 880)
         for i, box in enumerate((gate, vel, acc)):
@@ -461,11 +477,11 @@ def build_hub():
         P.c(artic, to_artic); P.c(to_artic, adapter)
 
         # --- Tab 3: Evolution & Capture (Evolve)
-        prob_d, mut_d = EVOLUTION_DEFAULTS
+        prob_d, mut_d = d["probability"], d["mutation"]
         P.comment(f"L{n + 1}", 285, ty, 20, tab=3)
-        prob = P.param("live.numbox", f"L{n + 1} Probability", 310, ty, 0, 100, prob_d, w=36, h=18, short="Prob %", tab=3)
-        mut = P.param("live.numbox", f"L{n + 1} Mutation", 352, ty, 0, 127, mut_d, w=36, h=18, short="Mutate", tab=3)
-        seed = P.param("live.numbox", f"L{n + 1} Seed", 394, ty, 0, 999, n + 1, w=32, h=18, short="Seed",
+        prob = P.param("live.numbox", f"L{n + 1} Probability", 310, ty, *R["probability"], prob_d, w=36, h=18, short="Prob %", tab=3)
+        mut = P.param("live.numbox", f"L{n + 1} Mutation", 352, ty, *R["mutation"], mut_d, w=36, h=18, short="Mutate", tab=3)
+        seed = P.param("live.numbox", f"L{n + 1} Seed", 394, ty, *R["seed"], d["seed"], w=32, h=18, short="Seed",
                        stored_only=True, tab=3)
         dice = P.add("live.text", 428, ty, w=18, h=18, ins=1, outs=2, text="⚄", texton="⚄", mode=0,
                      parameter_enable=1, tab=3, fontsize=12.0, saved_attribute_attributes={"valueof": {
@@ -516,19 +532,19 @@ def build_hub():
         # --- Tab 5: Voicing (Voice Matrix, Group Mode, Chord Shape)
         vy = 62 + 26 * n
         P.comment(f"L{n + 1}", 285, vy + 2, 24, tab=5)
-        for v in (1, 2, 3, 4):
+        for v in range(1, VOICES + 1):
             bx = 316 + 24 * (v - 1)
             btn = P.param("live.text", f"L{n + 1} Voice {v}", bx, vy, 0, 1, 1 if n == v - 1 else 0,
-                          w=22, h=20, short=f"L{n + 1} V{v}", tab=5, varname=f"btn_L{n + 1}_V{v}",
+                          w=22, h=20, short=f"L{n + 1} V{v}", tab=5, varname=name("voiceButton", n + 1, v),
                           text=str(v), texton=str(v), mode=1)
             to_voice = P.obj(f"prepend voice {n} {v}", lx + 20 * v, Y + 960)
             P.c(btn, to_voice); P.c(to_voice, adapter)
 
         gm = P.param("live.menu", f"L{n + 1} Group Mode", 422, vy + 2, 0, 0, 0, w=95, h=16, short="Group",
-                     enum=group_modes, tab=5, varname=f"menu_L{n + 1}_gm")
-        shape = P.param("live.menu", f"L{n + 1} Chord Shape", 525, vy + 2, 0, 0, chord_shapes.index("triad"), w=115,
-                        h=16, short="Chord", enum=chord_shapes, tab=5, varname=f"menu_L{n + 1}_chord")
-        grouping = P.obj(f"pak 0 {chord_shapes.index('triad')}", lx + 150, Y + 910, ins=2)
+                     enum=group_modes, tab=5, varname=name("groupMode", n + 1))
+        shape = P.param("live.menu", f"L{n + 1} Chord Shape", 525, vy + 2, 0, 0, chord_shapes.index(d["chordShape"]), w=115,
+                        h=16, short="Chord", enum=chord_shapes, tab=5, varname=name("chordShape", n + 1))
+        grouping = P.obj(f"pak {group_modes.index(d['groupMode'])} {chord_shapes.index(d['chordShape'])}", lx + 150, Y + 910, ins=2)
         to_group = P.obj(f"prepend group {n}", lx + 150, Y + 940)
         P.c(gm, grouping, 0, 0); P.c(shape, grouping, 0, 1); P.c(grouping, to_group); P.c(to_group, adapter)
 
@@ -538,7 +554,7 @@ def build_hub():
         rng = P.obj("prepend _parameter_range 0", lx + 60, ly + 30)
         P.c(length, len_t); P.c(len_t, rng, 1); P.c(rng, hits)
 
-        lane = P.obj(f"pak {hits_d} {len_d} {rot_d} {DEFAULT_RATE}", lx, ly + 60, ins=4)
+        lane = P.obj(f"pak {hits_d} {len_d} {rot_d} {rate_d}", lx, ly + 60, ins=4)
         prep = P.obj(f"prepend lane {n}", lx, ly + 90)
         P.c(hits, lane, 0, 0); P.c(len_t, lane, 0, 1); P.c(rotate, lane, 0, 2); P.c(rate, lane, 0, 3)
         P.c(lane, prep); P.c(prep, adapter)
@@ -558,7 +574,7 @@ def build_hub():
         P.c(arrived, when_stopped, 0, 1); P.c(stopped_now, when_stopped, 0, 0)
 
         # player: position = (song mod Reset period) mod Cycle length, exactly as the engine's locate()
-        where = "fmod(fmod($f1,$f3),$f2)"
+        where = SHARED["PLAYER_POSITION"]
         tick_t = P.obj("t i i b i", lx, ly + 200, ins=1, outs=4)
         pos_now = P.obj(f"expr {where}", lx + 60, ly + 230, ins=3)
         pos_t = P.obj("t f f", lx + 60, ly + 260, ins=1, outs=2)
@@ -576,11 +592,11 @@ def build_hub():
         P.c(tick_t, key, 0, 0)                           # then: look up this slot in the playing bank
         P.c(key, table)
         init_c = P.msg(str(len_d * 120), lx + 150, ly + 200)
-        init_r = P.msg(str(NEVER), lx + 200, ly + 200)
+        init_r = P.msg(str(float(NEVER)), lx + 200, ly + 200)
         init_key = P.msg(str(-BANK_SIZE), lx + 260, ly + 200)
         P.c(load, init_c); P.c(init_c, pos_now, 0, 1); P.c(init_c, key, 0, 1)
         P.c(load, init_r); P.c(init_r, pos_now, 0, 2); P.c(init_r, key, 0, 2)
-        P.c(adapter, pos_now, 3, 2); P.c(adapter, key, 3, 2)   # Reset period from the adapter
+        P.c(adapter, pos_now, OUT["resetPeriod"], 2); P.c(adapter, key, OUT["resetPeriod"], 2)   # Reset period from the adapter
         P.c(load, init_key); P.c(init_key, key, 0, 3)
 
         adopt_now = P.obj("t b", lx + 60, ly + 350)

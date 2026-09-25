@@ -76,3 +76,21 @@ describe("Captured Bases reopening a set", () => {
         expect(engine.captureDepth(0)).toBe(1);
       });
 });
+
+describe("Control ranges", () => {
+  it("keep every Lane setting inside the range its control allows", () => {
+    const engine = createEngine();
+    engine.configure({ lanes: [{ hits: 40, length: 64, rotate: -1, transpose: 9, octave: -4, gate: 0, velocity: 200 }] });
+    expect(engine.laneSettings(0)).toMatchObject({ hits: 32, length: 32, rotate: 0, transpose: 7, octave: -3, gate: 1, velocity: 127 });
+    engine.setLane(0, { accent: -5, probability: 101, mutation: 128, seed: 1000, length: 0 });
+    expect(engine.laneSettings(0)).toMatchObject({ accent: 0, probability: 100, mutation: 127, seed: 999, length: 1 });
+  });
+
+  it("keep the Pitch Cycle to its editor's steps and degrees", () => {
+    const engine = createEngine();
+    engine.configure({ lanes: [{ hits: 1, length: 4, rotate: 0, pitchCycle: [20, -20, 1, 2, 3, 4, 5, 6, 7] }] });
+    expect(engine.laneSettings(0).pitchCycle).toEqual([14, -14, 1, 2, 3, 4, 5, 6]);
+    engine.setLane(0, { pitchCycle: [] });
+    expect(engine.laneSettings(0).pitchCycle).toEqual([0]);
+  });
+});
