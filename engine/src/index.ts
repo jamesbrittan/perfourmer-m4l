@@ -1,9 +1,23 @@
 import { uniformInt } from "pure-rand/distribution/uniformInt";
 import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus";
 
-/** Named, known-good Euclidean rhythms (Toussaint 2005) a Lane can load as its Base. */
-export const RHYTHM_PRESETS = (
-  [
+/** Named, known-good Euclidean rhythms a Lane can load as its Base. */
+export const RHYTHM_PRESETS: readonly {
+  readonly name: string;
+  readonly hits: number;
+  readonly length: number;
+  readonly rotate: number;
+}[] = [
+  // Electronic / Genre rhythms
+  { name: "Four-on-the-floor 4/16", hits: 4, length: 16, rotate: 0 },
+  { name: "Offbeat 4/16", hits: 4, length: 16, rotate: 2 },
+  { name: "Straight 16ths 16/16", hits: 16, length: 16, rotate: 0 },
+  { name: "Syncopated 5/16", hits: 5, length: 16, rotate: 0 },
+  { name: "3-against-4 3/16", hits: 3, length: 16, rotate: 0 },
+  { name: "Phase 12 8/12", hits: 8, length: 12, rotate: 0 },
+  { name: "Phase 13 8/13", hits: 8, length: 13, rotate: 0 },
+  // Traditional Euclidean rhythms (Toussaint 2005)
+  ...([
     ["Khafif-e-ramal", 2, 5],
     ["Cumbia", 3, 4],
     ["Romanian folk", 3, 5],
@@ -25,8 +39,13 @@ export const RHYTHM_PRESETS = (
     ["Central African", 9, 16],
     ["Aka", 11, 24],
     ["Aka upper sangha", 13, 24],
-  ] as const
-).map(([name, hits, length]) => ({ name: `${name} ${hits}/${length}`, hits, length, rotate: 0 }));
+  ] as const).map(([name, hits, length]) => ({
+    name: `${name} ${hits}/${length}`,
+    hits,
+    length,
+    rotate: 0,
+  })),
+];
 
 /** tie: the note lasts right up to the next one (gap gate at 100%), so the two join legato. */
 export type Event = { onset: number; duration: number; pitch: number; velocity: number; voice: number; tie?: boolean };
@@ -413,19 +432,27 @@ export function createEngine() {
 
   return {
     configure(config: EngineConfig) {
-      lanes = config.lanes;
-      for (const [lane, entry] of captures) {
-        const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
-        if (matches) entry.waiting = false;
-        else if (!entry.waiting) captures.delete(lane);
+      if (config.lanes) {
+        lanes = config.lanes;
+        for (const [lane, entry] of captures) {
+          const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
+          if (matches) entry.waiting = false;
+          else if (!entry.waiting) captures.delete(lane);
+        }
       }
-      scale = config.scale ?? C_MAJOR;
-      split = config.split ?? "1+1+1+1";
-      const nextLayout = config.voiceLayout ?? SPLITS[split];
-      const prevLayout = config.previousVoiceLayout ?? (config.previousSplit ? SPLITS[config.previousSplit] : (config.voiceLayout ? splitChange.from : nextLayout));
-      voiceLayout = nextLayout;
-      splitChange = { from: prevLayout, at: config.splitAt ?? 0 };
-      resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
+      if (config.scale) scale = config.scale;
+      if (config.split) split = config.split;
+      if (config.voiceLayout || config.split) {
+        const nextLayout = config.voiceLayout ?? SPLITS[split];
+        const prevLayout = config.previousVoiceLayout ?? (config.previousSplit ? SPLITS[config.previousSplit] : (config.voiceLayout ? splitChange.from : nextLayout));
+        voiceLayout = nextLayout;
+        splitChange = { from: prevLayout, at: config.splitAt ?? 0 };
+      }
+      if (config.resetBars !== undefined || config.ticksPerBar !== undefined) {
+        const bars = config.resetBars !== undefined ? config.resetBars : (resetTicks ? resetTicks / (config.ticksPerBar ?? 1920) : 0);
+        const tpb = config.ticksPerBar ?? (resetTicks && bars ? resetTicks / bars : 1920);
+        resetTicks = bars * tpb;
+      }
     },
     cycleTicks,
     locate,
