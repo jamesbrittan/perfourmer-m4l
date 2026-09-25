@@ -235,29 +235,36 @@ function degreeToNote(degree, { root, intervals }) {
 function allocate(lane, notes) {
   return notes.map((note) => ({ ...note, voice: lane + 1 }));
 }
+var signature = ({ hits, length, rotate, pitchCycle = [0] }) => [hits, length, rotate, pitchCycle.length, ...pitchCycle];
 function createEngine() {
   let lanes = [];
+  const captures = /* @__PURE__ */ new Map();
   let scale = C_MAJOR;
   let resetTicks = 0;
   const voiceDevices = /* @__PURE__ */ new Map();
-  function cycleHits(lane, cycleIndex) {
-    const { hits, length, rotate, pitchCycle = [0], mutation = 0, probability = 100, seed = 0 } = lanes[lane];
+  function cycleHits(lane, cycleIndex, evolve = true) {
+    const { hits, length, rotate, pitchCycle = [0], seed = 0 } = lanes[lane];
+    const { mutation, probability } = evolve ? { mutation: 0, probability: 100, ...lanes[lane] } : { mutation: 0, probability: 100 };
+    const stack = captures.get(lane)?.stack;
+    const captured = stack?.[stack.length - 1];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
-    const base = pattern.map((_, step2) => pattern[(step2 - shift + length) % length]);
+    const base = captured?.steps ?? pattern.map((_, step2) => pattern[(step2 - shift + length) % length]);
     const rng = xoroshiro128plus(mix(seed, cycleIndex));
     const chance = () => uniformInt(rng, 0, 99999) / 1e5;
-    const [lo, hi] = [Math.min(...pitchCycle) - 3, Math.max(...pitchCycle) + 3];
+    const register = captured?.degrees ?? pitchCycle;
+    const [lo, hi] = [Math.min(...register) - 3, Math.max(...register) + 3];
     const baseHits = base.filter(Boolean).length;
+    const density = captured ? baseHits / length : hits / length;
     let hitIndex = cyclesSinceReset(lane, cycleIndex) * baseHits;
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
     const sounding = [];
     base.forEach((isHit, i) => {
       const [stepDraw, hitDraw, pitchDraw, degreeDraw, soundDraw] = [chance(), chance(), chance(), chance(), chance()];
-      const hit = stepDraw < mutation / 127 ? hitDraw < hits / length : isHit;
+      const hit = stepDraw < mutation / 127 ? hitDraw < density : isHit;
       if (!hit) return;
-      const baseDegree = pitchCycle[hitIndex++ % pitchCycle.length];
+      const baseDegree = captured ? captured.degrees[i] : pitchCycle[hitIndex++ % pitchCycle.length];
       const degree = pitchDraw < mutation / 127 ? lo + Math.floor(degreeDraw * (hi - lo + 1)) : baseDegree;
       const onset = i * step;
       if (soundDraw * 100 < probability && onset < end - 1e-6) sounding.push({ onset, degree });
@@ -367,6 +374,8 @@ function createEngine() {
   return {
     configure(config) {
       lanes = config.lanes;
+      for (const [lane, { signature: taken }] of captures)
+        if (!lanes[lane] || signature(lanes[lane]).join() !== taken.join()) captures.delete(lane);
       scale = config.scale ?? C_MAJOR;
       resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
     },
@@ -375,6 +384,56 @@ function createEngine() {
     renderCycle,
     cycleTable,
     slotTable,
+    /** Make the Cycle's sounding pattern the Lane's new Base (the previous one is kept for Revert). */
+    capture(lane, cycleIndex) {
+      const { length } = lanes[lane];
+      const heard = cycleHits(lane, cycleIndex);
+      const step = stepTicks(lane);
+      const steps = Array.from({ length }, (_, i) => heard.some((h) => Math.round(h.onset / step) === i));
+      const degreeAt = new Map(heard.map((h) => [Math.round(h.onset / step), h.degree]));
+      const last = heard[heard.length - 1]?.degree ?? (lanes[lane].pitchCycle ?? [0])[0];
+      let held = last;
+      const degrees = steps.map((_, i) => held = degreeAt.get(i) ?? held);
+      const entry = captures.get(lane) ?? { signature: signature(lanes[lane]), stack: [] };
+      entry.stack.push({ steps, degrees });
+      captures.set(lane, entry);
+    },
+    /** Go back to the Base from before the last Capture. */
+    revert(lane) {
+      const entry = captures.get(lane);
+      entry?.stack.pop();
+      if (entry && !entry.stack.length) captures.delete(lane);
+    },
+    /** Whether Mutation or probability make the Cycle depart from the Base. */
+    isMutated(lane, cycleIndex) {
+      return JSON.stringify(cycleHits(lane, cycleIndex)) !== JSON.stringify(cycleHits(lane, cycleIndex, false));
+    },
+    /** Every Lane's Captured Bases as plain numbers, for storing with the set. */
+    saveBases() {
+      const out = [1, captures.size];
+      for (const [lane, { signature: taken, stack }] of captures) {
+        out.push(lane, taken.length, ...taken, stack.length);
+        for (const { steps, degrees } of stack) out.push(steps.length, ...steps.map(Number), ...degrees);
+      }
+      return out;
+    },
+    loadBases(data) {
+      captures.clear();
+      if (data[0] !== 1) return;
+      let i = 2;
+      for (let n = 0; n < data[1]; n++) {
+        const lane = data[i++];
+        const taken = data.slice(i + 1, i + 1 + data[i]);
+        i += 1 + taken.length;
+        const stack = [];
+        for (let depth = data[i++]; depth > 0; depth--) {
+          const length = data[i++];
+          stack.push({ steps: data.slice(i, i + length).map(Boolean), degrees: data.slice(i + length, i + 2 * length) });
+          i += 2 * length;
+        }
+        captures.set(lane, { signature: taken, stack });
+      }
+    },
     voiceJoined(deviceId, voice) {
       voiceDevices.set(deviceId, voice);
     },

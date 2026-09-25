@@ -12,11 +12,12 @@
 // is playing: it withdraws the pending offer (after which the player can't switch) and reads the dict.
 autowatch = 1;
 inlets = 1;
-outlets = 7; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
+outlets = 8; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
 // switch at the next tick rather than the next Cycle boundary; release 1 = release the Lane's Voice on switching),
 // 2: Voice status text,
 // 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts,
-// 5: transport running (1) / stopped (0), 6: "set <text>" Scale readout
+// 5: transport running (1) / stopped (0), 6: "set <text>" Scale readout, 7: Captured Bases as numbers (to the
+// stored-only pattr that saves them with the set)
 
 const { createEngine, RATES } = require("pf4-engine.js");
 
@@ -83,6 +84,36 @@ function articulate(n, gate, velocity, accent) {
 function evolve(n, probability, mutation, seed) {
   Object.assign(params[n], { probability, mutation, seed });
   refresh(n);
+}
+
+// Capture: the Cycle sounding now becomes the Lane's Base (heard from the next Cycle)
+function capture(n) {
+  engine.configure({ lanes: params, ...song });
+  engine.capture(n, playing ? soundingCycle(n) : engine.locate(n, polledAt).cycleIndex);
+  storeBases();
+  refresh(n);
+}
+
+// Revert: back to the Base from before the last Capture
+function revert(n) {
+  engine.revert(n);
+  storeBases();
+  refresh(n);
+}
+
+let storedBases = "";
+function storeBases() {
+  const data = engine.saveBases();
+  storedBases = data.join(" ");
+  outlet(7, data);
+}
+
+// the pattr's saved value, when the set (or a preset) loads — and its echo of what we just stored
+function bases(...data) {
+  if (data.join(" ") === storedBases) return;
+  storedBases = data.join(" ");
+  engine.loadBases(data);
+  for (let n = 0; n < LANES; n++) refresh(n);
 }
 
 function transpose(n, degrees, octaves) {
@@ -262,7 +293,8 @@ function where(songTicks) {
     const { cycleIndex, offsetTicks } = engine.locate(n, songTicks);
     follow(n, cycleIndex);
     const step = Math.floor(offsetTicks / (engine.cycleTicks(n) / params[n].length)) + 1;
-    outlet(4, n, "set", `Cycle ${cycleIndex + 1} · step ${step}/${params[n].length}`);
+    const mutated = engine.isMutated(n, cycleIndex) ? " · mutated" : "";
+    outlet(4, n, "set", `Cycle ${cycleIndex + 1} · step ${step}/${params[n].length}${mutated}`);
   }
 }
 
