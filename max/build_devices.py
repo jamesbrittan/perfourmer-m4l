@@ -231,13 +231,33 @@ class Patch:
 
 
 LANES = 4
-LANE_DEFAULTS = [(5, 8, 0), (3, 8, 0), (2, 5, 0), (7, 12, 0)]  # must match params in pf4-hub.js
-PITCH_DEFAULTS = [([0, 4, 2, 5], 0), ([0, 2, 4], -1), ([0, -3], -2), ([4, 6, 7, 9, 11], 0)]  # (Pitch Cycle, octave)
+LANE_DEFAULTS = [
+    (16, 16, 0, 6),  # L1: 16 of 16, rot 0, rate 1/16 (index 6)
+    (4, 16, 2, 6),   # L2: 4 of 16, rot 2, rate 1/16 (index 6)
+    (2, 7, 0, 2),    # L3: 2 of 7, rot 0, rate 1/4 (index 2)
+    (5, 13, 0, 6),   # L4: 5 of 13, rot 0, rate 1/16 (index 6)
+]  # must match params in pf4-hub.js
+PITCH_DEFAULTS = [
+    ([0, 0, 7, 0, 5], -2),
+    ([0, 3], -1),
+    ([0, 2, 4], 0),
+    ([7, 9, 11, 12, 14], 1),
+]  # (Pitch Cycle, octave)
 PITCH_STEPS = 8
-ARTICULATION_DEFAULTS = (50, 100, 0)  # Gate %, Velocity, Accent; must match pf4-hub.js
+ARTICULATION_DEFAULTS = [
+    (50, 100, 15),
+    (30, 100, 0),
+    (100, 90, 0),
+    (50, 85, 0),
+]  # per Lane: (Gate %, Velocity, Accent); must match pf4-hub.js
 LFO_DEFAULTS = [(7, 5), (11, 9), (13, 15), (17, 19)]  # per Lane: (AT rate, CC1 rate) in bars; depths default to 0 (off)
 LFO_UPDATE_MS = 40  # LFO sampling; only changed values are sent, so the MIDI port isn't flooded
-EVOLUTION_DEFAULTS = (100, 0)  # Probability %, Mutation; the seed defaults to the Lane number (pf4-hub.js)
+EVOLUTION_DEFAULTS = [
+    (100, 0),
+    (100, 0),
+    (100, 0),
+    (100, 20),
+]  # per Lane: (Probability %, Mutation); the seed defaults to the Lane number (pf4-hub.js)
 PLAYER_DICT = "pf4.player"  # each Lane's playing bank, read by the adapter (pf4-hub.js)
 RATES = ["1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16Q", "1/16T", "1/16S", "1/32", "1/32Q"]  # = engine RATES
 DEFAULT_RATE = RATES.index("1/16")
@@ -383,7 +403,7 @@ def build_hub():
     P.comment("Chord Shape", 530, 32, 90, tab=5)
 
     for n in range(LANES):
-        hits_d, len_d, rot_d = LANE_DEFAULTS[n]
+        hits_d, len_d, rot_d, rate_d = LANE_DEFAULTS[n]
         row_y = 52 + 28 * n
         ry = row_y   # row Y in permanent left section
         ty = row_y   # row Y in tabbed section (tabs 1–4)
@@ -403,13 +423,13 @@ def build_hub():
         # --- Tab 0: Rhythm (4 columns side-by-side, 90px each)
         rx = 285 + 90 * n
         P.comment(f"Lane {n + 1}", rx, 26, 60, tab=0)
-        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, 0, len_d, hits_d, short="Hits", tab=0,
+        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, 0, 32, hits_d, short="Hits", tab=0,
                        varname=f"dial_L{n + 1}_hits")
         length = P.param("live.dial", f"L{n + 1} Length", rx + 44, 42, 1, 32, len_d, short="Length", tab=0,
                          varname=f"dial_L{n + 1}_len")
         rotate = P.param("live.dial", f"L{n + 1} Rotate", rx, 92, 0, 31, rot_d, short="Rotate", tab=0,
                          varname=f"dial_L{n + 1}_rot")
-        rate = P.param("live.dial", f"L{n + 1} Rate", rx + 44, 92, 0, 0, DEFAULT_RATE, short="Rate", enum=RATES, tab=0,
+        rate = P.param("live.dial", f"L{n + 1} Rate", rx + 44, 92, 0, 0, rate_d, short="Rate", enum=RATES, tab=0,
                        varname=f"dial_L{n + 1}_rate")
         menu = P.param("live.menu", f"L{n + 1} Rhythm", rx, 142, 0, 0, 0, w=88, h=16, short="Rhythm", enum=presets, tab=0,
                        varname=f"menu_L{n + 1}_rhythm")
@@ -445,7 +465,7 @@ def build_hub():
         P.c(trans, shift, 0, 0); P.c(octv, shift, 0, 1); P.c(shift, to_shift); P.c(to_shift, adapter)
 
         # --- Tab 2: Dynamics / Articulation (Feel)
-        gate_d, vel_d, acc_d = ARTICULATION_DEFAULTS
+        gate_d, vel_d, acc_d = ARTICULATION_DEFAULTS[n]
         P.comment(f"L{n + 1}", 285, ty, 20, tab=2)
         gate = P.param("live.numbox", f"L{n + 1} Gate", 325, ty, 1, 100, gate_d, w=48, h=18, short="Gate %", tab=2)
         vel = P.param("live.numbox", f"L{n + 1} Velocity", 405, ty, 1, 127, vel_d, w=48, h=18, short="Vel", tab=2)
@@ -457,7 +477,7 @@ def build_hub():
         P.c(artic, to_artic); P.c(to_artic, adapter)
 
         # --- Tab 3: Evolution & Capture (Evolve)
-        prob_d, mut_d = EVOLUTION_DEFAULTS
+        prob_d, mut_d = EVOLUTION_DEFAULTS[n]
         P.comment(f"L{n + 1}", 285, ty, 20, tab=3)
         prob = P.param("live.numbox", f"L{n + 1} Probability", 310, ty, 0, 100, prob_d, w=36, h=18, short="Prob %", tab=3)
         mut = P.param("live.numbox", f"L{n + 1} Mutation", 352, ty, 0, 127, mut_d, w=36, h=18, short="Mutate", tab=3)
