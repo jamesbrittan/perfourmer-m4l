@@ -31,12 +31,12 @@ const NEVER = 1e12; // "no Reset" as a period the player's modulo can use
 
 const engine = createEngine();
 // defaults must match LANE_DEFAULTS, PITCH_DEFAULTS, ARTICULATION_DEFAULTS and EVOLUTION_DEFAULTS in build_devices.py
-const articulation = { gate: 50, velocity: 100, accent: 0, probability: 100, mutation: 0 };
+// defaults must match LANE_DEFAULTS, PITCH_DEFAULTS, ARTICULATION_DEFAULTS and EVOLUTION_DEFAULTS in build_devices.py
 const params = [
-  { hits: 5, length: 8, rotate: 0, rate: "1/16", pitchCycle: [0, 4, 2, 5], transpose: 0, octave: 0, ...articulation },
-  { hits: 3, length: 8, rotate: 0, rate: "1/16", pitchCycle: [0, 2, 4], transpose: 0, octave: -1, ...articulation },
-  { hits: 2, length: 5, rotate: 0, rate: "1/16", pitchCycle: [0, -3], transpose: 0, octave: -2, ...articulation },
-  { hits: 7, length: 12, rotate: 0, rate: "1/16", pitchCycle: [4, 6, 7, 9, 11], transpose: 0, octave: 0, ...articulation },
+  { hits: 16, length: 16, rotate: 0, rate: "1/16", pitchCycle: [0, 0, 7, 0, 5], transpose: 0, octave: -2, gate: 50, velocity: 100, accent: 15, probability: 100, mutation: 0 },
+  { hits: 4, length: 16, rotate: 2, rate: "1/16", pitchCycle: [0, 3], transpose: 0, octave: -1, gate: 30, velocity: 100, accent: 0, probability: 100, mutation: 0 },
+  { hits: 2, length: 7, rotate: 0, rate: "1/4", pitchCycle: [0, 2, 4], transpose: 0, octave: 0, gate: 100, velocity: 90, accent: 0, probability: 100, mutation: 0 },
+  { hits: 5, length: 13, rotate: 0, rate: "1/16", pitchCycle: [7, 9, 11, 12, 14], transpose: 0, octave: 1, gate: 50, velocity: 85, accent: 0, probability: 100, mutation: 20 },
 ].map((lane, n) => ({ ...lane, seed: n + 1 }));
 const matrix = [
   [1, 0, 0, 0],
