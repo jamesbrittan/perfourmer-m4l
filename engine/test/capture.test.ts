@@ -89,6 +89,25 @@ describe("The Captured Base", () => {
   });
 });
 
+describe("Capture depth", () => {
+  it("counts the Captured Bases Revert can step back through", () => {
+    const engine = setup();
+    expect(engine.captureDepth(0)).toBe(0);
+    engine.capture(0, 2);
+    engine.capture(0, 5);
+    expect(engine.captureDepth(0)).toBe(2);
+    engine.revert(0);
+    expect(engine.captureDepth(0)).toBe(1);
+    const reloaded = createEngine();
+    reloaded.loadBases(engine.saveBases());
+    expect(reloaded.captureDepth(0)).toBe(0); // waiting for its controls
+    reloaded.configure({ lanes: [LANE] });
+    expect(reloaded.captureDepth(0)).toBe(1);
+    engine.configure({ lanes: [{ ...LANE, hits: 3 }] });
+    expect(engine.captureDepth(0)).toBe(0);
+  });
+});
+
 describe("Mutated from Base", () => {
   it("tells whether a Cycle departs from the Base", () => {
     expect(setup({ mutation: 0 }).isMutated(0, 5)).toBe(false);

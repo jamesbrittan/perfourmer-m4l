@@ -89,6 +89,8 @@ HELP = {
     # readouts
     "readout:Cycle": ("Lane position", "Which Cycle the Lane is in and which step, from song position. 'mutated' "
                       "means Mutation or Probability has changed this Cycle from the Base."),
+    "readout:Base": ("Base", "What Mutation departs from: the Euclidean pattern, or a Captured Base (with how many "
+                     "Captures Revert can step back through). Captured Bases are saved with the set."),
     "readout:Scale": ("Scale", "Live's current Scale, which every Lane follows. Change it in Live's control bar or "
                       "on Push."),
     "readout:Waiting": ("Voices found", "The Voice devices found in the rack after the Hub, and any missing or "
@@ -110,7 +112,7 @@ def info_for(box):
     if box["maxclass"] not in ("comment", "message"):
         return None
     for start, key in (("Cycle ", "readout:Cycle"), ("Scale:", "readout:Scale"), ("Waiting for Voices", "readout:Waiting"),
-                       ("Perfourmer setup", "readout:setup")):
+                       ("Perfourmer setup", "readout:setup"), ("Base:", "readout:Base")):
         if text.startswith(start):
             return HELP[key]
     if text and set(text) <= set("·●◉○"):
@@ -277,7 +279,7 @@ def build_hub():
     poll = P.obj("metro 100 @active 1", 1300, Y, ins=2)
     poll_pos = P.obj("transport", 1300, Y + 30, ins=2, outs=9)
     where = P.obj("prepend where", 1300, Y + 60)
-    readouts = P.obj("route 0 1 2 3", 1300, Y + 90, ins=2, outs=5)
+    readouts = P.obj("route 0 1 2 3 4 5 6 7", 1300, Y + 90, ins=2, outs=9)  # 0–3 positions, 4–7 Bases
     P.c(poll, poll_pos); P.c(poll_pos, where, 7); P.c(where, adapter); P.c(adapter, readouts, 4)
     P.c(load, adapter)                               # render every Lane once
 
@@ -361,6 +363,8 @@ def build_hub():
                                "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
             action = P.msg(f"{label.lower()} {n}", lx + 230 + 50 * (bx == 1244), Y + 880)
             P.c(button, action); P.c(action, adapter)  # a live.text button sends a bang, not 1
+        base_readout = P.add("comment", 1196, py + 19, w=92, h=13, text="Base: Euclidean", fontsize=9, ins=1, outs=0)
+        P.c(readouts, base_readout, LANES + n)
         py_l = Y + 700  # this Lane's pitch logic
         initial = " ".join(str(degrees[i] if i < len(degrees) else 0) for i in range(PITCH_STEPS))
         pitch = P.obj(f"pak {len(degrees)} {initial}", lx, py_l, ins=9)

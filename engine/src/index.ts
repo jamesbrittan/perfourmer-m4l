@@ -322,6 +322,10 @@ export function createEngine() {
       entry?.stack.pop();
       if (entry && !entry.stack.length) captures.delete(lane);
     },
+    /** How many Captured Bases the Lane has (Revert steps back through them); 0 = its Euclidean pattern. */
+    captureDepth(lane: number) {
+      return active(lane)?.stack.length ?? 0;
+    },
     /** Whether Mutation or probability make the Cycle depart from the Base. */
     isMutated(lane: number, cycleIndex: number) {
       return JSON.stringify(cycleHits(lane, cycleIndex)) !== JSON.stringify(cycleHits(lane, cycleIndex, false));
