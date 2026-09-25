@@ -5,11 +5,16 @@
 // Every Cycle can differ (the Pitch Cycle drifts against the hits), so while the transport runs each adoption
 // triggers the render of the Cycle after it; while stopped, the playing bank is kept on the Cycle at the song
 // position, so playback can start anywhere.
+// A Gate or Velocity change can't wait for the boundary: the playing Cycle is re-rendered into the other bank and
+// offered "now", and the player switches at its next tick. Note-offs are handed on between tables (past a Cycle's
+// end, and from a replaced table), so notes still end wherever the switch lands.
 // Our messages from the player arrive late (v8 is low priority), so a render never trusts them to know which bank
 // is playing: it withdraws the pending offer (after which the player can't switch) and reads the dict.
 autowatch = 1;
 inlets = 1;
-outlets = 7; // 0: table edits, 1: "<lane> <bank> <cycleTicks>" pending (bank -1 = withdrawn), 2: Voice status text,
+outlets = 7; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
+// switch at the next tick rather than the next Cycle boundary; release 1 = release the Lane's Voice on switching),
+// 2: Voice status text,
 // 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts,
 // 5: transport running (1) / stopped (0), 6: "set <text>" Scale readout
 
@@ -21,16 +26,22 @@ const LANES = 4;
 const NEVER = 1e12; // "no Reset" as a period the player's modulo can use
 
 const engine = createEngine();
-// defaults must match LANE_DEFAULTS and PITCH_DEFAULTS in build_devices.py
+// defaults must match LANE_DEFAULTS, PITCH_DEFAULTS and ARTICULATION_DEFAULTS in build_devices.py
+const articulation = { gateMode: "step", gate: 50, velocity: 100, accent: 0 };
 const params = [
-  { hits: 5, length: 8, rotate: 0, rate: "1/16", pitchCycle: [0, 4, 2, 5], transpose: 0, octave: 0 },
-  { hits: 3, length: 8, rotate: 0, rate: "1/16", pitchCycle: [0, 2, 4], transpose: 0, octave: -1 },
-  { hits: 2, length: 5, rotate: 0, rate: "1/16", pitchCycle: [0, -3], transpose: 0, octave: -2 },
-  { hits: 7, length: 12, rotate: 0, rate: "1/16", pitchCycle: [4, 6, 7, 9, 11], transpose: 0, octave: 0 },
+  { hits: 5, length: 8, rotate: 0, rate: "1/16", pitchCycle: [0, 4, 2, 5], transpose: 0, octave: 0, ...articulation },
+  { hits: 3, length: 8, rotate: 0, rate: "1/16", pitchCycle: [0, 2, 4], transpose: 0, octave: -1, ...articulation },
+  { hits: 2, length: 5, rotate: 0, rate: "1/16", pitchCycle: [0, -3], transpose: 0, octave: -2, ...articulation },
+  { hits: 7, length: 12, rotate: 0, rate: "1/16", pitchCycle: [4, 6, 7, 9, 11], transpose: 0, octave: 0, ...articulation },
 ];
+const GATE_MODES = ["step", "gap"]; // the Gate Mode control's choices
 const song = { resetBars: 0, ticksPerBar: 1920, scale: { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] } };
 const writtenKeys = params.map(() => [[], []]);
 const bankCycle = params.map(() => [0, 0]); // the Cycle each bank holds
+const EMPTY = { slots: [], carry: [] };
+const bankTable = params.map(() => [EMPTY, EMPTY]); // what each bank holds, and the note-offs it hands on
+const bankCarried = params.map(() => [[], []]); // the note-offs each bank took over from the Cycle before it
+const bankFrame = params.map(() => ["", ""]); // Cycle length and Reset period each bank was rendered for
 const offered = params.map(() => -1); // the bank last offered to the player as pending
 const adoptedAt = params.map(() => null); // song position of each Lane's last adoption while running
 let polledAt = 0; // song position at the last poll
@@ -59,6 +70,14 @@ function lane(n, hits, length, rotate, rateIndex) {
 function pitch(n, length, ...degrees) {
   params[n].pitchCycle = degrees.slice(0, length);
   refresh(n);
+}
+
+// Gate Mode (0 step, 1 gap), Gate %, Velocity, Accent: heard from the next note, not the next Cycle
+function articulate(n, modeIndex, gate, velocity, accent) {
+  Object.assign(params[n], { gateMode: GATE_MODES[modeIndex], gate, velocity, accent });
+  engine.configure({ lanes: params, ...song });
+  if (!playing) return refresh(n);
+  render(n, null, true);
 }
 
 function transpose(n, degrees, octaves) {
@@ -136,7 +155,10 @@ function sendReset() {
 function adopt(n, bank, songTicks) {
   if (!playing) return;
   adoptedAt[n] = songTicks;
-  prepareNext(n, engine.locate(n, songTicks).cycleIndex);
+  const sounding = engine.locate(n, songTicks).cycleIndex;
+  // wrong Cycle (e.g. Length/Rate changed the numbering, or a "now" offer landed on a boundary): replace it at once
+  if (bankCycle[n][playingBank(n)] !== sounding) return render(n, sounding, true);
+  prepareNext(n, sounding);
 }
 
 // a change reaches the Lane from its next Cycle (or at once while stopped)
@@ -173,20 +195,38 @@ function bang() {
   showVoices();
 }
 
-function render(n, cycleIndex) {
-  outlet(1, n, -1, 0); // withdraw the pending offer: from here on the player stays on its bank
+// now: replace the playing Cycle from the player's next tick, instead of waiting for its next Cycle boundary
+// (cycleIndex null = the Cycle the playing bank holds, as read once the player can no longer switch)
+function render(n, cycleIndex, now = false) {
+  outlet(1, n, -1, 0, 0, 0); // withdraw the pending offer: from here on the player stays on its bank
   offered[n] = -1;
-  const bank = 1 - playingBank(n);
+  const playingNow = playingBank(n);
+  if (cycleIndex === null) cycleIndex = bankCycle[n][playingNow];
+  const bank = 1 - playingNow;
   engine.configure({ lanes: params, ...song });
+  // note-offs handed on. Running, whatever is offered follows the playing Cycle in time (even when a Length or Rate
+  // change has renumbered the Cycles), so it takes that Cycle's carried note-offs; a "now" replacement takes over
+  // the ones the playing Cycle took over, plus everything it would have sent. Stopped, nothing is sounding.
+  // If the Cycle length or Reset period changed, the old note-off positions mean nothing in the new table: the
+  // player releases the Voice as it switches instead.
+  const frame = `${engine.cycleTicks(n)}/${song.resetBars * song.ticksPerBar}`;
+  const release = playing && frame !== bankFrame[n][playingNow];
+  const handOn = playing && !release;
+  const carried = !handOn ? [] : now ? bankCarried[n][playingNow] : bankTable[n][playingNow].carry;
+  const table = engine.cycleTable(n, GRID_TICKS, cycleIndex, carried, handOn && now ? bankTable[n][playingNow] : EMPTY);
   for (const key of writtenKeys[n][bank]) outlet(0, "remove", key);
-  writtenKeys[n][bank] = engine.slotTable(n, GRID_TICKS, cycleIndex).map(({ slot, notes }) => {
+  writtenKeys[n][bank] = table.slots.map(({ slot, notes }) => {
     const key = (n * 2 + bank) * BANK_SIZE + slot;
     outlet(0, [key].concat(...notes));
     return key;
   });
   bankCycle[n][bank] = cycleIndex;
+  bankTable[n][bank] = table;
+  bankCarried[n][bank] = carried;
+  bankFrame[n][bank] = frame;
   offered[n] = bank;
-  outlet(1, n, bank, engine.cycleTicks(n)); // while stopped the player adopts this at once (re-entering adopt)
+  // while stopped the player adopts this at once (re-entering adopt)
+  outlet(1, n, bank, engine.cycleTicks(n), now && playing ? 1 : 0, release ? 1 : 0);
 }
 
 // Keep a Lane's banks on the polled song position (cycleIndex = the Cycle there). Stopped, the player should hold

@@ -41,8 +41,6 @@ var RATE_TICKS = {
 var RATES = Object.keys(RATE_TICKS);
 var MIDDLE_C = 60;
 var C_MAJOR = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
-var GATE = 0.5;
-var VELOCITY = 100;
 function bjorklund(hits, length) {
   hits = Math.max(0, Math.min(hits, length));
   if (hits === 0 || hits === length) return Array.from({ length }, () => hits > 0);
@@ -72,17 +70,23 @@ function createEngine() {
   const voiceDevices = /* @__PURE__ */ new Map();
   function renderCycle(lane, cycleIndex) {
     const { hits, length, rotate, pitchCycle = [0], transpose = 0, octave = 0 } = lanes[lane];
+    const { gateMode = "step", gate = 50, velocity = 100, accent = 0 } = lanes[lane];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
     const rotated = pattern.map((_, step2) => pattern[(step2 - shift + length) % length]);
     const step = stepTicks(lane);
-    const onsets = rotated.flatMap((hit, i) => hit ? [i * step] : []);
-    const hitsBefore = cyclesSinceReset(lane, cycleIndex) * onsets.length;
+    const end = playedTicks(lane, cycleIndex);
+    const patternOnsets = rotated.flatMap((hit, i) => hit ? [i * step] : []);
+    const onsets = patternOnsets.filter((onset) => onset < end - 1e-6);
+    const gaps = onsets.map((onset, i) => (i + 1 < onsets.length ? onsets[i + 1] : end + patternOnsets[0]) - onset);
+    const tie = gateMode === "gap" && gate >= 100;
+    const hitsBefore = cyclesSinceReset(lane, cycleIndex) * patternOnsets.length;
     const notes = onsets.map((onset, hit) => ({
       onset,
-      duration: step * GATE,
+      duration: (gateMode === "gap" ? gaps[hit] : step) * gate / 100,
       pitch: clampToMidi(degreeToNote(pitchCycle[(hitsBefore + hit) % pitchCycle.length] + transpose, scale) + 12 * octave),
-      velocity: VELOCITY
+      velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
+      ...tie && { tie }
     }));
     return allocate(lane, notes);
   }
@@ -91,6 +95,10 @@ function createEngine() {
   }
   function cycleTicks(lane) {
     return lanes[lane].length * stepTicks(lane);
+  }
+  function playedTicks(lane, cycleIndex) {
+    const cycle = cycleTicks(lane);
+    return resetTicks ? Math.min(cycle, resetTicks - cyclesSinceReset(lane, cycleIndex) * cycle) : cycle;
   }
   function cyclesPerPeriod(lane) {
     return resetTicks ? Math.ceil(resetTicks / cycleTicks(lane)) : Infinity;
@@ -107,17 +115,62 @@ function createEngine() {
       offsetTicks: sinceReset % cycle
     };
   }
-  function slotTable(lane, gridTicks, cycleIndex = 0) {
-    const slots = /* @__PURE__ */ new Map();
-    const at = (tick, note) => {
-      const slot = Math.round(tick / gridTicks);
-      slots.set(slot, [...slots.get(slot) ?? [], note]);
-    };
-    for (const e of renderCycle(lane, cycleIndex)) {
-      at(e.onset, [e.voice, e.pitch, e.velocity]);
-      at(e.onset + e.duration, [e.voice, e.pitch, 0]);
+  function cycleTable(lane, gridTicks, cycleIndex = 0, carried = [], replacing = { slots: [], carry: [] }) {
+    const slotOf = (tick) => Math.floor(tick / gridTicks + 1e-9);
+    const end = playedTicks(lane, cycleIndex);
+    const aligned = Number.isInteger(cycleTicks(lane) / gridTicks) && Number.isInteger(end / gridTicks);
+    const lastSlot = aligned ? end / gridTicks - 1 : Math.ceil(end / gridTicks) - 2;
+    const nextCycleSlot = (tick) => Math.max(0, slotOf(tick - end));
+    const ons = renderCycle(lane, cycleIndex);
+    const carry = [];
+    const offs = carried.filter((off) => off.slot <= lastSlot);
+    for (const off of carried) if (off.slot > lastSlot) carry.push({ ...off, slot: nextCycleSlot(off.slot * gridTicks) });
+    for (const e of ons) {
+      const off = { voice: e.voice, pitch: e.pitch, tie: Boolean(e.tie) };
+      const tick = e.onset + e.duration;
+      const slot = Math.max(slotOf(tick), slotOf(e.onset) + 1);
+      if (slot > lastSlot) carry.push({ ...off, slot: nextCycleSlot(tick) });
+      else offs.push({ ...off, slot });
     }
-    return [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes }));
+    const held = (off) => (e) => off.tie && slotOf(e.onset) === off.slot && e.voice === off.voice && e.pitch === off.pitch;
+    const skippedOns = /* @__PURE__ */ new Set();
+    const sentOffs = offs.filter((off) => {
+      const continued = ons.find(held(off));
+      if (continued) skippedOns.add(continued);
+      return !continued;
+    });
+    const sent = new Set(sentOffs);
+    const oldOns = replacing.slots.flatMap(
+      ({ slot, notes }) => notes.filter(([, , velocity]) => velocity > 0).map(([voice, pitch]) => ({ slot, voice, pitch }))
+    );
+    const newEnd = (on) => {
+      const e = ons.find((x) => slotOf(x.onset) === on.slot && x.voice === on.voice && x.pitch === on.pitch);
+      if (!e || skippedOns.has(e)) return -Infinity;
+      const off = offs.find((o) => o.voice === e.voice && o.pitch === e.pitch && o.slot > on.slot);
+      if (off) return sent.has(off) ? off.slot : Infinity;
+      return carry.some((c) => c.voice === e.voice && c.pitch === e.pitch) ? Infinity : -Infinity;
+    };
+    for (const { slot, notes } of replacing.slots)
+      for (const [voice, pitch, velocity] of notes) {
+        if (velocity !== 0) continue;
+        const started = oldOns.filter((o) => o.voice === voice && o.pitch === pitch && o.slot < slot).pop();
+        const duplicate = sentOffs.some((o) => o.slot === slot && o.voice === voice && o.pitch === pitch);
+        if (!duplicate && !(started && newEnd(started) >= slot)) sentOffs.push({ slot, voice, pitch, tie: false });
+      }
+    const slots = /* @__PURE__ */ new Map();
+    const add = (slot, note) => slots.set(slot, [...slots.get(slot) ?? [], note]);
+    const onsAt = (slot) => ons.filter((e) => !skippedOns.has(e) && slotOf(e.onset) === slot);
+    const retriggers = (off) => onsAt(off.slot).some((e) => e.voice === off.voice && e.pitch === off.pitch);
+    for (const off of sentOffs.filter(retriggers)) add(off.slot, [off.voice, off.pitch, 0]);
+    for (const e of ons) if (!skippedOns.has(e)) add(slotOf(e.onset), [e.voice, e.pitch, e.velocity]);
+    for (const off of sentOffs.filter((off2) => !retriggers(off2))) add(off.slot, [off.voice, off.pitch, 0]);
+    const same = (a) => (b) => a.voice === b.voice && a.pitch === b.pitch;
+    const identical = (a) => (b) => same(a)(b) && a.slot === b.slot && a.tie === b.tie;
+    for (const old of replacing.carry) if (!carry.some(identical(old))) carry.push({ ...old, tie: false });
+    return { slots: [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes })), carry };
+  }
+  function slotTable(lane, gridTicks, cycleIndex = 0) {
+    return cycleTable(lane, gridTicks, cycleIndex).slots;
   }
   return {
     configure(config) {
@@ -128,6 +181,7 @@ function createEngine() {
     cycleTicks,
     locate,
     renderCycle,
+    cycleTable,
     slotTable,
     voiceJoined(deviceId, voice) {
       voiceDevices.set(deviceId, voice);

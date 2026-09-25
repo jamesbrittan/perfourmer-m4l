@@ -94,6 +94,8 @@ LANES = 4
 LANE_DEFAULTS = [(5, 8, 0), (3, 8, 0), (2, 5, 0), (7, 12, 0)]  # must match params in pf4-hub.js
 PITCH_DEFAULTS = [([0, 4, 2, 5], 0), ([0, 2, 4], -1), ([0, -3], -2), ([4, 6, 7, 9, 11], 0)]  # (Pitch Cycle, octave)
 PITCH_STEPS = 8
+GATE_MODES = ["Step", "Gap"]  # = GATE_MODES in pf4-hub.js
+ARTICULATION_DEFAULTS = (0, 50, 100, 0)  # Gate Mode, Gate %, Velocity, Accent; must match pf4-hub.js
 PLAYER_DICT = "pf4.player"  # each Lane's playing bank, read by the adapter (pf4-hub.js)
 RATES = ["1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16Q", "1/16T", "1/16S", "1/32", "1/32Q"]  # = engine RATES
 DEFAULT_RATE = RATES.index("1/16")
@@ -164,6 +166,9 @@ def build_hub():
     contiguous = P.obj("expr ($i1 > 0) && ($i1 <= 16)", 700, Y + 110)
     P.c(clock, pos); P.c(pos, tick, 7); P.c(tick, clock_t)
     P.c(clock_t, delta, 2, 0); P.c(delta, contiguous); P.c(clock_t, delta, 1, 1); P.c(clock_t, fan, 0)
+    # a jump in song position skips note-offs: release every Voice (this runs before any Lane's lookups)
+    jumped = P.obj("sel 0", 700, Y + 130, ins=2, outs=2)
+    P.c(contiguous, jumped); P.c(jumped, release_all)
 
     for n in range(LANES):
         hits_d, len_d, rot_d = LANE_DEFAULTS[n]
@@ -187,7 +192,24 @@ def build_hub():
                  for i in range(PITCH_STEPS)]
         trans = P.param("live.numbox", f"L{n + 1} Transpose", 850, py, -7, 7, 0, w=30, h=18, short="Trans")
         octv = P.param("live.numbox", f"L{n + 1} Octave", 884, py, -3, 3, octave, w=30, h=18, short="Oct")
+        # Articulation: Gate Mode, Gate %, Velocity, Accent — heard from the next note
+        mode_d, gate_d, vel_d, acc_d = ARTICULATION_DEFAULTS
+        if n == 0:
+            for label, ax in (("Len", 602), ("Pitch Cycle (scale degrees)", 636), ("Trans", 850), ("Oct", 884)):
+                P.comment(label, ax, 4, 140 if ax == 636 else 34)
+            for label, ax in (("Gate", 924), ("Gate %", 972), ("Vel", 1008), ("Accent", 1044)):
+                P.comment(label, ax, 4, 34)
+        gmode = P.param("live.tab", f"L{n + 1} Gate Mode", 924, py, 0, 1, mode_d, w=44, h=18, short="Gate",
+                        enum=GATE_MODES)
+        gate = P.param("live.numbox", f"L{n + 1} Gate", 972, py, 1, 100, gate_d, w=32, h=18, short="Gate %")
+        vel = P.param("live.numbox", f"L{n + 1} Velocity", 1008, py, 1, 127, vel_d, w=32, h=18, short="Vel")
+        acc = P.param("live.numbox", f"L{n + 1} Accent", 1044, py, 0, 127, acc_d, w=32, h=18, short="Accent")
         lx = 200 + 300 * n  # this Lane's logic column
+        artic = P.obj(f"pak {mode_d} {gate_d} {vel_d} {acc_d}", lx, Y + 850, ins=4)
+        to_artic = P.obj(f"prepend articulate {n}", lx, Y + 880)
+        for i, box in enumerate((gmode, gate, vel, acc)):
+            P.c(box, artic, 0, i)
+        P.c(artic, to_artic); P.c(to_artic, adapter)
         py_l = Y + 700  # this Lane's pitch logic
         initial = " ".join(str(degrees[i] if i < len(degrees) else 0) for i in range(PITCH_STEPS))
         pitch = P.obj(f"pak {len(degrees)} {initial}", lx, py_l, ins=9)
@@ -214,26 +236,34 @@ def build_hub():
         P.c(hits, lane, 0, 0); P.c(len_t, lane, 0, 1); P.c(rotate, lane, 0, 2); P.c(rate, lane, 0, 3)
         P.c(lane, prep); P.c(prep, adapter)
 
-        # pending bank + Cycle length (fractional for odd rates), held until adopted
+        # pending bank, Cycle length (fractional for odd rates), "now" flag (take it up at the next tick) and
+        # "release" flag (release the Voice on taking it up), held until adopted
         arrived = P.obj("t b l", lx, ly + 110, ins=1, outs=2)
-        unpack = P.obj("unpack 0 0.", lx, ly + 130, ins=1, outs=2)
+        unpack = P.obj("unpack 0 0. 0 0", lx, ly + 130, ins=1, outs=4)
         pend_bank = P.obj("i -1", lx, ly + 160, ins=2)
         pend_ticks = P.obj(f"f {len_d * 120}", lx + 60, ly + 160, ins=2)
+        now_flag = P.obj("i 0", lx + 180, ly + 160, ins=2)
+        rel_flag = P.obj("i 0", lx + 220, ly + 160, ins=2)
         P.c(pending, arrived, n); P.c(arrived, unpack, 1)
         P.c(unpack, pend_bank, 0, 1); P.c(unpack, pend_ticks, 1, 1)
+        P.c(unpack, now_flag, 2, 1); P.c(unpack, rel_flag, 3, 1)
         when_stopped = P.obj("gate 1 1", lx + 120, ly + 130, ins=2)  # stopped: take it up now, not at play
         P.c(arrived, when_stopped, 0, 1); P.c(stopped_now, when_stopped, 0, 0)
 
         # player: position = (song mod Reset period) mod Cycle length, exactly as the engine's locate()
         where = "fmod(fmod($f1,$f3),$f2)"
-        tick_t = P.obj("t i i i", lx, ly + 200, ins=1, outs=3)
+        tick_t = P.obj("t i i b i", lx, ly + 200, ins=1, outs=4)
         pos_now = P.obj(f"expr {where}", lx + 60, ly + 230, ins=3)
         pos_t = P.obj("t f f", lx + 60, ly + 260, ins=1, outs=2)
         wrapped = P.obj("expr ($f1 < $f2) && $i3", lx + 60, ly + 290, ins=3)  # position went backwards = new Cycle
         is_new = P.obj("sel 1", lx + 60, ly + 320, ins=2, outs=2)
-        key = P.obj(f"expr $i4*{BANK_SIZE} + int({where}/{GRID_TICKS}. + 0.5)", lx, ly + 460, ins=4)
+        # slot = floor(position / grid): consecutive ticks read slots 0, 1, 2, … from every Cycle's start
+        key = P.obj(f"expr $i4*{BANK_SIZE} + int({where}/{GRID_TICKS}.)", lx, ly + 460, ins=4)
         P.c(fan, tick_t, LANES - 1 - n)
-        P.c(tick_t, pos_now, 1, 0)                       # first: adopt a pending bank if a Cycle began
+        P.c(tick_t, now_flag, 2, 0)                      # first: a "now" offer is taken up straight away
+        take_now = P.obj("sel 1", lx + 180, ly + 190, ins=2, outs=2)
+        P.c(now_flag, take_now)
+        P.c(tick_t, pos_now, 1, 0)                       # then: adopt a pending bank if a Cycle began
         P.c(pos_now, pos_t); P.c(pos_t, wrapped, 1, 0); P.c(pos_t, wrapped, 0, 1)
         P.c(wrapped, is_new); P.c(contiguous, wrapped, 0, 2)
         P.c(tick_t, key, 0, 0)                           # then: look up this slot in the playing bank
@@ -248,27 +278,33 @@ def build_hub():
 
         adopt_now = P.obj("t b", lx + 60, ly + 350)
         has_pending = P.obj("sel -1", lx + 60, ly + 380, ins=2, outs=2)
-        # adopting (right to left): new Cycle length, new bank for lookups and in the player dict, clear pending,
-        # then tell the adapter "adopt <lane> <bank> <songTicks>" (it may offer the next bank straight away, so
-        # pending must already be clear), then release the Voice's held notes
-        adopt_t = P.obj("t b i i i b", lx + 60, ly + 410, ins=1, outs=5)
+        adopt_t = P.obj("t i b i i b", lx + 60, ly + 410, ins=1, outs=5)
         bank_key = P.obj(f"+ {n * 2}", lx + 110, ly + 440, ins=2)
         noted = P.obj(f"prepend replace lane{n}", lx + 200, ly + 440)
         at_tick = P.obj("pack 0 0", lx + 160, ly + 470, ins=2)
         to_adapter = P.obj(f"prepend adopt {n}", lx + 160, ly + 500)
         release = P.msg(f"release {n + 1}", lx + 60, ly + 470)  # 4×mono: Lane n+1 plays Voice n+1
         clear_pending = P.msg("-1", lx + 110, ly + 500)
+        clear_now = P.msg("0", lx + 140, ly + 500)
+        releasing = P.obj("sel 1", lx + 20, ly + 440, ins=2, outs=2)
         P.c(is_new, adopt_now); P.c(when_stopped, adopt_now); P.c(adopt_now, pend_bank); P.c(pend_bank, has_pending)
         P.c(has_pending, adopt_t, 1)
+        P.c(has_pending, release, 0)  # a Cycle boundary with nothing pending (v8 fell behind): release, don't hang
+        P.c(take_now, adopt_now)
+        # adopting (right to left): new Cycle length; new bank for lookups and in the player dict; clear pending and
+        # the "now" flag; release the Voice if flagged; then tell the adapter (it may offer the next bank at once,
+        # so everything above must already be done)
         P.c(adopt_t, pend_ticks, 4); P.c(pend_ticks, pos_now, 0, 1); P.c(pend_ticks, key, 0, 1)
         P.c(adopt_t, bank_key, 3); P.c(bank_key, key, 0, 3); P.c(adopt_t, noted, 3); P.c(noted, player_state)
         P.c(adopt_t, clear_pending, 2); P.c(clear_pending, pend_bank, 0, 1)
-        P.c(tick_t, at_tick, 2, 1)                       # the song tick of this adoption
-        P.c(adopt_t, at_tick, 1, 0); P.c(at_tick, to_adapter); P.c(to_adapter, adapter)
-        P.c(adopt_t, release, 0); P.c(release, bus)
+        P.c(adopt_t, clear_now, 2); P.c(clear_now, now_flag, 0, 1)
+        P.c(adopt_t, rel_flag, 1); P.c(rel_flag, releasing); P.c(releasing, release)
+        P.c(tick_t, at_tick, 3, 1)                       # the song tick of this adoption
+        P.c(adopt_t, at_tick, 0, 0); P.c(at_tick, to_adapter); P.c(to_adapter, adapter)
+        P.c(release, bus)
         P.c(started, adopt_now, 1)  # transport start adopts whatever is pending
 
-    P.save_amxd("PF4 Hub.amxd", 920)
+    P.save_amxd("PF4 Hub.amxd", 1080)
 
 
 def build_voice():
