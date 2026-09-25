@@ -42,6 +42,8 @@ HELP = {
                  "forever, 127 = a new pattern every Cycle. Seeded by song position, so a section replays the same "
                  "evolution."),
     "Seed": ("Seed", "Chooses which evolution Mutation and Probability follow. Saved with the set, not automatable."),
+    "New Seed": ("New Seed", "Picks a new random Seed for this Lane: a different evolution for Mutation and "
+                 "Probability, which then replays the same way. Takes effect from the next Cycle."),
     "Capture": ("Capture", "Makes the Cycle playing now the Lane's Base, so Mutation 0 repeats it and Mutation "
                 "departs from it. Revert undoes it."),
     "Revert": ("Revert", "Goes back to the Base from before the last Capture."),
@@ -307,6 +309,14 @@ def build_hub():
         mut = P.param("live.numbox", f"L{n + 1} Mutation", 1120, py, 0, 127, mut_d, w=32, h=18, short="Mutate")
         seed = P.param("live.numbox", f"L{n + 1} Seed", 1156, py, 0, 999, n + 1, w=32, h=18, short="Seed",
                        stored_only=True)
+        # dice under the Seed box: a new random Seed (0–999), exactly as if typed in
+        dice = P.add("live.text", 1156, py + 19, w=32, h=13, ins=1, outs=2, text="⚄", texton="⚄", mode=0,
+                     parameter_enable=1, saved_attribute_attributes={"valueof": {
+                         "parameter_longname": f"L{n + 1} New Seed", "parameter_shortname": "New Seed",
+                         "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
+        roll = P.obj("sel 1", lx + 150, Y + 820, ins=2, outs=2)
+        new_seed = P.obj("random 1000", lx + 200, Y + 820, ins=2)
+        P.c(dice, roll); P.c(roll, new_seed); P.c(new_seed, seed)
         evo = P.obj(f"pak {prob_d} {mut_d} {n + 1}", lx + 150, Y + 850, ins=3)
         to_evo = P.obj(f"prepend evolve {n}", lx + 150, Y + 880)
         for i, box in enumerate((prob, mut, seed)):
