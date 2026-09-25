@@ -12,14 +12,16 @@
 // is playing: it withdraws the pending offer (after which the player can't switch) and reads the dict.
 autowatch = 1;
 inlets = 1;
-outlets = 9; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
+outlets = 11; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
 // switch at the next tick rather than the next Cycle boundary; release 1 = release the Lane's Voice on switching),
 // 2: Voice status text,
 // 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts (lanes 4–7: Base readouts),
 // 5: transport running (1) / stopped (0), 6: "set <text>" Scale readout, 7: Captured Bases as numbers (to the
-// stored-only pattr that saves them with the set), 8: "<lane> set <text>" pattern view
+// stored-only pattr that saves them with the set), 8: "<lane> set <text>" pattern view,
+// 9: "<lane> <hits> <rotate> <length>" to set a Lane's dials from a Rhythm Preset, 10: "<lane> set 0" to show the
+// Rhythm Preset menu as "—" once the dials no longer match the preset
 
-const { createEngine, RATES } = require("pf4-engine.js");
+const { createEngine, RATES, RHYTHM_PRESETS } = require("pf4-engine.js");
 
 const GRID_TICKS = 2; // must match the player's metro
 const BANK_SIZE = 10000; // table key = (lane * 2 + bank) * BANK_SIZE + slot
@@ -63,7 +65,25 @@ function pendingCycle(n) {
 
 function lane(n, hits, length, rotate, rateIndex) {
   Object.assign(params[n], { hits, length, rotate, rate: RATES[rateIndex] });
+  const preset = RHYTHM_PRESETS[chosenPreset[n] - 1];
+  if (preset && !loadingPreset && (preset.hits !== hits || preset.length !== length || preset.rotate !== rotate)) {
+    chosenPreset[n] = 0;
+    outlet(10, n, "set", 0);
+  }
   refresh(n);
+}
+
+// Rhythm Preset menu (0 = none): set the Lane's Hits, Length and Rotate dials to the preset. Changing Hits, Length
+// or Rotate hands the Lane back from any Captured Base, so the preset becomes the Base.
+const chosenPreset = params.map(() => 0);
+let loadingPreset = false;
+function rhythm(n, index) {
+  chosenPreset[n] = index;
+  const preset = RHYTHM_PRESETS[index - 1];
+  if (!preset) return;
+  loadingPreset = true; // the dials report back straight away, one at a time
+  outlet(9, n, preset.hits, preset.rotate, preset.length);
+  loadingPreset = false;
 }
 
 // Pitch Cycle editor: its length, then all 8 degree boxes (only the first <length> are used)

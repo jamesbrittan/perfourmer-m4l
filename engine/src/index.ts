@@ -1,6 +1,33 @@
 import { uniformInt } from "pure-rand/distribution/uniformInt";
 import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus";
 
+/** Named, known-good Euclidean rhythms (Toussaint 2005) a Lane can load as its Base. */
+export const RHYTHM_PRESETS = (
+  [
+    ["Khafif-e-ramal", 2, 5],
+    ["Cumbia", 3, 4],
+    ["Romanian folk", 3, 5],
+    ["Ruchenitza", 3, 7],
+    ["Tresillo", 3, 8],
+    ["Ruchenitza", 4, 7],
+    ["Aksak", 4, 9],
+    ["Outside Now", 4, 11],
+    ["York-Samai", 5, 6],
+    ["Nawakhat", 5, 7],
+    ["Cinquillo", 5, 8],
+    ["Agsag-Samai", 5, 9],
+    ["Moussorgsky", 5, 11],
+    ["Venda", 5, 12],
+    ["Bossa nova", 5, 16],
+    ["Tuareg", 7, 8],
+    ["West African bell", 7, 12],
+    ["Samba", 7, 16],
+    ["Central African", 9, 16],
+    ["Aka", 11, 24],
+    ["Aka upper sangha", 13, 24],
+  ] as const
+).map(([name, hits, length]) => ({ name: `${name} ${hits}/${length}`, hits, length, rotate: 0 }));
+
 /** tie: the note lasts right up to the next one (gap gate at 100%), so the two join legato. */
 export type Event = { onset: number; duration: number; pitch: number; velocity: number; voice: number; tie?: boolean };
 /** Step length in ticks at 480 PPQ, slowest first. Q = quintuplet, T = triplet, S = septuplet. */

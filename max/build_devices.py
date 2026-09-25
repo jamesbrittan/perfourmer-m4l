@@ -221,6 +221,12 @@ PLAYER_DICT = "pf4.player"  # each Lane's playing bank, read by the adapter (pf4
 RATES = ["1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16Q", "1/16T", "1/16S", "1/32", "1/32Q"]  # = engine RATES
 DEFAULT_RATE = RATES.index("1/16")
 NEVER = 1e12  # "no Reset" period, as in pf4-hub.js
+
+
+def rhythm_preset_names():
+    """The engine's Rhythm Preset names, read from the built bundle so the menu can't drift from it."""
+    script = 'console.log(JSON.stringify(require("./pf4-engine.js").RHYTHM_PRESETS.map((p) => p.name)))'
+    return json.loads(subprocess.check_output(["node", "-e", script], cwd=HERE))
 HUB_BUS = "pf4.hub"
 
 
@@ -229,7 +235,11 @@ def build_hub():
     Y = 220  # logic lives below the visible 169px device area
 
     # --- adapter + shared player table
-    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=9)
+    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=11)
+    preset_dials = P.obj("route 0 1 2 3", 1300, Y + 150, ins=2, outs=5)
+    preset_menus = P.obj("route 0 1 2 3", 1300, Y + 180, ins=2, outs=5)
+    P.c(adapter, preset_dials, 9); P.c(adapter, preset_menus, 10)
+    presets = ["—"] + rhythm_preset_names()
     table = P.obj("coll", 4, Y + 40, ins=1, outs=4)
     shared_notes = P.obj("zl iter 3", 4, Y + 80, ins=2, outs=2)
     pending = P.obj("route 0 1 2 3", 200, Y + 40, ins=2, outs=5)
@@ -317,7 +327,14 @@ def build_hub():
         length = P.param("live.dial", f"L{n + 1} Length", x + 46, 30, 1, 64, len_d, short="Length")
         rotate = P.param("live.dial", f"L{n + 1} Rotate", x, 80, 0, 63, rot_d, short="Rotate")
         rate = P.param("live.dial", f"L{n + 1} Rate", x + 46, 80, 0, 0, DEFAULT_RATE, short="Rate", enum=RATES)
-        readout = P.add("comment", x, 132, w=92, h=30, text="Cycle – · step –", ins=1, outs=0)
+        readout = P.add("comment", x, 148, w=92, h=18, text="Cycle – · step –", ins=1, outs=0)
+        # Rhythm Preset menu: loads Hits, Length and Rotate (mappable, so the E16 can step through them)
+        menu = P.param("live.menu", f"L{n + 1} Rhythm", x, 130, 0, 0, 0, w=90, h=15, short="Rhythm", enum=presets)
+        to_rhythm = P.obj(f"prepend rhythm {n}", 200 + 300 * n, Y + 910)
+        P.c(menu, to_rhythm); P.c(to_rhythm, adapter); P.c(preset_menus, menu, n)
+        dials = P.obj("unpack 0 0 0", 200 + 300 * n, Y + 940, ins=1, outs=3)  # right to left: Length, Rotate, Hits
+        P.c(preset_dials, dials, n)
+        P.c(dials, length, 2); P.c(dials, rotate, 1); P.c(dials, hits, 0)
         P.c(readouts, readout, n)
 
         # Pitch Cycle editor: one row per Lane — length, 8 degrees (steps past the length greyed out), transpose
