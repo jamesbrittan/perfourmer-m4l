@@ -1,7 +1,10 @@
 import { uniformInt } from "pure-rand/distribution/uniformInt";
 import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus";
 
+import { inRange } from "./device";
+
 export { createScheduler, type PlayerCommand } from "./scheduler";
+export * from "./device";
 
 /** Named, known-good Euclidean rhythms a Lane can load as its Base. */
 export const RHYTHM_PRESETS: readonly {
@@ -463,9 +466,10 @@ export function createEngine() {
   }
 
   return {
-    /** Replace every setting: the Lanes, and the song settings (anything left out takes its default). */
+    /** Replace every setting: the Lanes, and the song settings (anything left out takes its default). Lane
+     * settings are brought inside the control ranges (RANGES), here and in setLane. */
     configure(config: EngineConfig) {
-      lanes = config.lanes.map((lane) => ({ ...lane }));
+      lanes = config.lanes.map((lane) => inRange(lane) as LaneParams);
       scale = config.scale ?? C_MAJOR;
       ticksPerBar = config.ticksPerBar ?? 1920;
       resetTicks = (config.resetBars ?? 0) * ticksPerBar;
@@ -474,7 +478,7 @@ export function createEngine() {
     },
     /** Change some of a Lane's settings, keeping the rest. */
     setLane(lane: number, change: Partial<LaneParams>) {
-      lanes[lane] = { ...lanes[lane], ...change };
+      lanes[lane] = { ...lanes[lane], ...inRange(change) };
       settingsChanged();
     },
     /** Change some of the song settings, keeping the rest. */

@@ -1,4 +1,4 @@
-import { createEngine, createScheduler, SPLITS, type LaneParams, type Scale, type Split } from "../src/index";
+import { createEngine, createScheduler, LANE_DEFAULTS, LANES, PLAYER, SPLITS, type LaneParams, type Scale, type Split } from "../src/index";
 
 /**
  * A model of the Hub's native player, driven by the scheduler as the Hub drives it: it plays the two banks per Lane
@@ -9,17 +9,9 @@ import { createEngine, createScheduler, SPLITS, type LaneParams, type Scale, typ
  * writing to its table, as if its Cycle boundary came part-way through the render.
  */
 
-const GRID = 2;
-const BANK = 10000;
-const LANES = 4;
+const GRID = PLAYER.gridTicks;
+const BANK = PLAYER.bankSize;
 const TICKS_PER_BAR = 1920;
-
-export const DEFAULT_LANES: LaneParams[] = [
-  { hits: 5, length: 8, rotate: 0, pitchCycle: [0, 4, 2, 5], octave: 0 },
-  { hits: 3, length: 8, rotate: 0, pitchCycle: [0, 2, 4], octave: -1 },
-  { hits: 2, length: 5, rotate: 0, pitchCycle: [0, -3], octave: -2 },
-  { hits: 7, length: 12, rotate: 0, pitchCycle: [4, 6, 7, 9, 11], octave: 0 },
-].map((lane, n) => ({ rate: "1/16", transpose: 0, gate: 50, velocity: 100, accent: 0, probability: 100, mutation: 0, ...lane, seed: n + 1 }));
 
 /** What the Hub's controls do, as the Hub passes them on. */
 export type Controls = ReturnType<typeof hub>;
@@ -80,7 +72,7 @@ export type SimOptions = {
 
 export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, setup, edits = [] }: SimOptions) {
   const engine = createEngine();
-  engine.configure({ lanes: DEFAULT_LANES, resetBars });
+  engine.configure({ lanes: LANE_DEFAULTS, resetBars });
   const resetTicks = resetBars ? resetBars * TICKS_PER_BAR : 1e12;
   const table = new Map<number, number[]>();
   const noted: (number | undefined)[] = []; // the bank each Lane's player notes it's playing
