@@ -223,9 +223,9 @@ DEFAULT_RATE = RATES.index("1/16")
 NEVER = 1e12  # "no Reset" period, as in pf4-hub.js
 
 
-def rhythm_preset_names():
-    """The engine's Rhythm Preset names, read from the built bundle so the menu can't drift from it."""
-    script = 'console.log(JSON.stringify(require("./pf4-engine.js").RHYTHM_PRESETS.map((p) => p.name)))'
+def from_engine(expression):
+    """A value from the built engine bundle (e.g. menu choices), so the devices can't drift from the engine."""
+    script = f'const engine = require("./pf4-engine.js"); console.log(JSON.stringify({expression}))'
     return json.loads(subprocess.check_output(["node", "-e", script], cwd=HERE))
 HUB_BUS = "pf4.hub"
 
@@ -235,11 +235,17 @@ def build_hub():
     Y = 220  # logic lives below the visible 169px device area
 
     # --- adapter + shared player table
-    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=11)
+    adapter = P.codebox(embedded("pf4-hub.js", inline_engine=True), 4, Y + 900, ins=1, outs=13)
     preset_dials = P.obj("route 0 1 2 3", 1300, Y + 150, ins=2, outs=5)
     preset_menus = P.obj("route 0 1 2 3", 1300, Y + 180, ins=2, outs=5)
     P.c(adapter, preset_dials, 9); P.c(adapter, preset_menus, 10)
-    presets = ["—"] + rhythm_preset_names()
+    presets = ["—"] + from_engine("engine.RHYTHM_PRESETS.map((p) => p.name)")
+    group_modes = from_engine("engine.GROUP_MODES")
+    chord_shapes = from_engine("Object.keys(engine.CHORD_SHAPES)")
+    lane_voices = P.obj("route 0 1 2 3", 1300, Y + 210, ins=2, outs=5)
+    P.c(adapter, lane_voices, 11)
+    release_reach = P.obj("route 0 1 2 3", 1300, Y + 240, ins=2, outs=5)
+    P.c(adapter, release_reach, 12)
     table = P.obj("coll", 4, Y + 40, ins=1, outs=4)
     shared_notes = P.obj("zl iter 3", 4, Y + 80, ins=2, outs=2)
     pending = P.obj("route 0 1 2 3", 200, Y + 40, ins=2, outs=5)
@@ -257,8 +263,14 @@ def build_hub():
     P.comment("bars (0 = off)", 488, 48, 80)
     reset_msg = P.obj("prepend reset", 700, Y - 30)
     P.c(reset, reset_msg); P.c(reset_msg, adapter)
+    # Voice Layout: the Split (how the four Voices are grouped); Lanes take the groups in order
+    P.comment("Voices", 380, 68, 64)
+    split = P.param("live.menu", "Split", 446, 68, 0, 0, 0, w=80, h=16, short="Split",
+                    enum=from_engine("Object.keys(engine.SPLITS)"))
+    to_split = P.obj("prepend split", 700, Y + 200)
+    P.c(split, to_split); P.c(to_split, adapter)
     P.comment("Perfourmer setup: Play Mode M1 · synth ch 1–4 on MIDI ch 1–4 · "
-              "Edit 3 (aftertouch → cutoff) on", 380, 76, 190)
+              "Edit 3 (aftertouch → cutoff) on", 380, 90, 190)
     scale_readout = P.add("comment", 380, 140, w=190, h=18, text="Scale: –", ins=1, outs=0)
     P.c(adapter, scale_readout, 6)
     player_state = P.obj(f"dict {PLAYER_DICT}", 1500, Y, ins=2, outs=4)
@@ -402,6 +414,19 @@ def build_hub():
             P.c(load, init_period); P.c(init_period, lfo, 0, 2)
             P.c(lfo, changed); P.c(changed, out); P.c(out, bus)
         view = P.add("comment", 1452, py, w=400, h=18, text="·" * len_d, ins=1, outs=0)
+        # Voice Layout per Lane: Group Mode and Chord Shape (from the next Cycle), and the Voices it drives
+        if n == 0:
+            for label, gx in (("Group", 1860), ("Chord", 1944), ("Voices", 2028)):
+                P.comment(label, gx, 4, 60)
+        gm = P.param("live.menu", f"L{n + 1} Group Mode", 1860, py, 0, 0, 0, w=80, h=16, short="Group",
+                     enum=group_modes)
+        shape = P.param("live.menu", f"L{n + 1} Chord Shape", 1944, py, 0, 0, chord_shapes.index("triad"), w=80,
+                        h=16, short="Chord", enum=chord_shapes)
+        grouping = P.obj(f"pak 0 {chord_shapes.index('triad')}", lx + 150, Y + 910, ins=2)
+        to_group = P.obj(f"prepend group {n}", lx + 150, Y + 940)
+        P.c(gm, grouping, 0, 0); P.c(shape, grouping, 0, 1); P.c(grouping, to_group); P.c(to_group, adapter)
+        voices_shown = P.add("comment", 2028, py, w=70, h=18, text=f"V{n + 1}", ins=1, outs=0)
+        P.c(lane_voices, voices_shown, n)
         P.c(patterns, view, n)
         # Capture / Revert buttons
         for label, bx in (("Capture", 1196), ("Revert", 1244)):
@@ -486,7 +511,14 @@ def build_hub():
         noted = P.obj(f"prepend replace lane{n}", lx + 200, ly + 440)
         at_tick = P.obj("pack 0 0", lx + 160, ly + 470, ins=2)
         to_adapter = P.obj(f"prepend adopt {n}", lx + 160, ly + 500)
-        release = P.msg(f"release {n + 1}", lx + 60, ly + 470)  # 4×mono: Lane n+1 plays Voice n+1
+        # releasing a Lane releases every Voice it may be sounding on (its group, from the adapter)
+        release = P.obj("t b", lx + 60, ly + 470)
+        reach = P.obj("zl reg", lx + 60, ly + 490, ins=2, outs=2)
+        each = P.obj("zl iter 1", lx + 60, ly + 510, ins=2, outs=2)
+        to_voice = P.obj("prepend release", lx + 60, ly + 530)
+        init_reach = P.msg(str(n + 1), lx + 120, ly + 490)
+        P.c(release, reach); P.c(reach, each); P.c(each, to_voice); P.c(to_voice, bus)
+        P.c(release_reach, reach, n, 1); P.c(load, init_reach); P.c(init_reach, reach, 0, 1)
         clear_pending = P.msg("-1", lx + 110, ly + 500)
         clear_now = P.msg("0", lx + 140, ly + 500)
         releasing = P.obj("sel 1", lx + 20, ly + 440, ins=2, outs=2)
@@ -508,11 +540,10 @@ def build_hub():
         P.c(adopt_t, rel_flag, 1); P.c(rel_flag, releasing); P.c(releasing, release)
         P.c(tick_t, at_tick, 3, 1)                       # the song tick of this adoption
         P.c(adopt_t, at_tick, 0, 0); P.c(at_tick, to_adapter); P.c(to_adapter, adapter)
-        P.c(release, bus)
         # (no adoption on transport start: the playing bank already holds the Cycle at the song position, and a
         # bank still pending from before the stop would swap tables under a sounding note)
 
-    P.save_amxd("PF4 Hub.amxd", 1856)
+    P.save_amxd("PF4 Hub.amxd", 2100)
 
 
 def build_voice():

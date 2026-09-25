@@ -12,16 +12,17 @@
 // is playing: it withdraws the pending offer (after which the player can't switch) and reads the dict.
 autowatch = 1;
 inlets = 1;
-outlets = 11; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
+outlets = 13; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
 // switch at the next tick rather than the next Cycle boundary; release 1 = release the Lane's Voice on switching),
 // 2: Voice status text,
 // 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts (lanes 4–7: Base readouts),
 // 5: transport running (1) / stopped (0), 6: "set <text>" Scale readout, 7: Captured Bases as numbers (to the
 // stored-only pattr that saves them with the set), 8: "<lane> set <text>" pattern view,
 // 9: "<lane> <hits> <rotate> <length>" to set a Lane's dials from a Rhythm Preset, 10: "<lane> set 0" to show the
-// Rhythm Preset menu as "—" once the dials no longer match the preset
+// Rhythm Preset menu as "—" once the dials no longer match the preset, 11: "<lane> set <text>" the Lane's Voices,
+// 12: "<lane> <voice> …" the Voices the player releases for that Lane (current and, during a Split change, previous)
 
-const { createEngine, RATES, RHYTHM_PRESETS } = require("pf4-engine.js");
+const { createEngine, RATES, RHYTHM_PRESETS, SPLITS, GROUP_MODES, CHORD_SHAPES } = require("pf4-engine.js");
 
 const GRID_TICKS = 2; // must match the player's metro
 const BANK_SIZE = 10000; // table key = (lane * 2 + bank) * BANK_SIZE + slot
@@ -37,7 +38,14 @@ const params = [
   { hits: 2, length: 5, rotate: 0, rate: "1/16", pitchCycle: [0, -3], transpose: 0, octave: -2, ...articulation },
   { hits: 7, length: 12, rotate: 0, rate: "1/16", pitchCycle: [4, 6, 7, 9, 11], transpose: 0, octave: 0, ...articulation },
 ].map((lane, n) => ({ ...lane, seed: n + 1 }));
-const song = { resetBars: 0, ticksPerBar: 1920, scale: { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] } };
+const song = {
+  resetBars: 0,
+  ticksPerBar: 1920,
+  scale: { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] },
+  split: "1+1+1+1",
+  previousSplit: "1+1+1+1",
+  splitAt: 0,
+};
 const writtenKeys = params.map(() => [[], []]);
 const bankCycle = params.map(() => [0, 0]); // the Cycle each bank holds
 const EMPTY = { slots: [], carry: [] };
@@ -134,6 +142,43 @@ function bases(...data) {
   storedBases = data.join(" ");
   engine.loadBases(data);
   for (let n = 0; n < LANES; n++) refresh(n);
+}
+
+// Voice Layout. Split (global menu index): while playing it takes effect at the next bar for every Lane (at least an
+// eighth note away), ending notes still sounding there; stopped, at once.
+function split(index) {
+  const next = Object.keys(SPLITS)[index];
+  if (!next || next === song.split) return;
+  const bar = song.ticksPerBar;
+  let at = (Math.floor(polledAt / bar) + 1) * bar;
+  if (at - polledAt < 240) at += bar;
+  // if an earlier change hasn't happened yet, the Split in effect is still its previous one
+  const inEffect = playing && polledAt < song.splitAt ? song.previousSplit : song.split;
+  Object.assign(song, { previousSplit: inEffect, split: next, splitAt: playing ? at : 0 });
+  engine.configure({ lanes: params, ...song });
+  for (let n = 0; n < LANES; n++) {
+    if (playing) render(n, null, true); // the playing Cycle may already reach past the bar
+    else refresh(n);
+  }
+  showLaneVoices();
+}
+
+// Group Mode and Chord Shape (menu indices): from the Lane's next Cycle
+function group(n, modeIndex, shapeIndex) {
+  Object.assign(params[n], { groupMode: GROUP_MODES[modeIndex], chordShape: Object.keys(CHORD_SHAPES)[shapeIndex] });
+  refresh(n);
+  showLaneVoices();
+}
+
+function showLaneVoices() {
+  for (let n = 0; n < LANES; n++) {
+    const reach = [...new Set([...(SPLITS[song.previousSplit][n] || []), ...(SPLITS[song.split][n] || [])])];
+    outlet(12, n, ...reach);
+    const voices = SPLITS[song.split][n] || [];
+    const mode = voices.length > 1 ? ` ${params[n].groupMode || "poly"}` : "";
+    const text = !voices.length ? "no Voices" : voices.length === 1 ? `V${voices[0]}` : `V${voices[0]}–${voices[voices.length - 1]}${mode}`;
+    outlet(11, n, "set", text);
+  }
 }
 
 function transpose(n, degrees, octaves) {
@@ -256,6 +301,7 @@ function bang() {
   for (let n = 0; n < LANES; n++) render(n, 0);
   sendReset();
   showVoices();
+  showLaneVoices();
 }
 
 // now: replace the playing Cycle from the player's next tick, instead of waiting for its next Cycle boundary
@@ -309,6 +355,11 @@ function follow(n, cycleIndex) {
 // song position (polled a few times a second): show where each Lane is, from the engine's own locate()
 function where(songTicks) {
   polledAt = songTicks;
+  if (song.previousSplit !== song.split && playing && songTicks >= song.splitAt + song.ticksPerBar) {
+    song.previousSplit = song.split; // the change is well past: its old groups no longer need releasing
+    engine.configure({ lanes: params, ...song });
+    showLaneVoices();
+  }
   for (let n = 0; n < LANES; n++) {
     const { cycleIndex, offsetTicks } = engine.locate(n, songTicks);
     follow(n, cycleIndex);
