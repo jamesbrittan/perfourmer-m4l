@@ -197,6 +197,7 @@ export function createEngine() {
   // and any still sounding there end there. `from` is the current layout once the change is retired.
   let layoutChange: { from: VoiceLayout; at: number } = { from: voiceLayout, at: 0 };
   let ticksPerBar = 1920;
+  let resetBars = 0;
   let resetTicks = 0; // 0 = Lanes never realign
   let basesChanged = 0; // counts changes to the Captured Bases, so a cached Lane view knows it's out of date
   const views = new Map<number, { key: string; view: Omit<LaneView, "step"> }>();
@@ -445,23 +446,51 @@ export function createEngine() {
     return { slots: [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes })), carry };
   }
 
+  /** A Captured Base waits (after loading a set) until its Lane's controls match the ones it was captured with, and
+   * gives way to the controls when they change from those. */
+  function settingsChanged() {
+    for (const [lane, entry] of captures) {
+      const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
+      if (matches && entry.waiting) entry.waiting = false;
+      else if (!matches && !entry.waiting) captures.delete(lane);
+      else continue;
+      basesChanged++;
+    }
+  }
+
   function slotTable(lane: number, gridTicks: number, cycleIndex = 0): Slot[] {
     return cycleTable(lane, gridTicks, cycleIndex).slots;
   }
 
   return {
+    /** Replace every setting: the Lanes, and the song settings (anything left out takes its default). */
     configure(config: EngineConfig) {
-      lanes = config.lanes;
-      for (const [lane, entry] of captures) {
-        const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
-        if (matches && entry.waiting) entry.waiting = false;
-        else if (!matches && !entry.waiting) captures.delete(lane);
-        else continue;
-        basesChanged++;
-      }
+      lanes = config.lanes.map((lane) => ({ ...lane }));
       scale = config.scale ?? C_MAJOR;
       ticksPerBar = config.ticksPerBar ?? 1920;
       resetTicks = (config.resetBars ?? 0) * ticksPerBar;
+      resetBars = config.resetBars ?? 0;
+      settingsChanged();
+    },
+    /** Change some of a Lane's settings, keeping the rest. */
+    setLane(lane: number, change: Partial<LaneParams>) {
+      lanes[lane] = { ...lanes[lane], ...change };
+      settingsChanged();
+    },
+    /** Change some of the song settings, keeping the rest. */
+    setSong(change: Omit<EngineConfig, "lanes">) {
+      if (change.scale) scale = change.scale;
+      if (change.ticksPerBar !== undefined) ticksPerBar = change.ticksPerBar;
+      if (change.resetBars !== undefined) resetBars = change.resetBars;
+      resetTicks = resetBars * ticksPerBar;
+    },
+    /** The song settings as they stand. */
+    songSettings(): Required<Omit<EngineConfig, "lanes">> {
+      return { scale, resetBars, ticksPerBar };
+    },
+    /** A Lane's settings as they stand (a copy). */
+    laneSettings(lane: number): Readonly<LaneParams> {
+      return { ...lanes[lane] };
     },
     cycleTicks,
     /** The Reset period in ticks (0 = no Reset). */
@@ -574,8 +603,7 @@ export function createEngine() {
         }
         captures.set(lane, { signature: taken, stack, waiting: true });
       }
-      for (const [lane, entry] of captures)
-        if (lanes[lane] && signature(lanes[lane]).join() === entry.signature.join()) entry.waiting = false;
+      settingsChanged(); // the controls may already match
     },
     voiceJoined(deviceId: number, voice: number) {
       voiceDevices.set(deviceId, voice);
