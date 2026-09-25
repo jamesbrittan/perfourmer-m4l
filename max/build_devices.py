@@ -419,7 +419,7 @@ def build_hub():
         # --- Tab 0: Rhythm (4 columns side-by-side, 90px each)
         rx = 285 + 90 * n
         P.comment(f"Lane {n + 1}", rx, 26, 60, tab=0)
-        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, R["hits"][0], len_d, hits_d, short="Hits", tab=0,
+        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, *R["hits"], hits_d, short="Hits", tab=0,
                        varname=name("hits", n + 1))
         length = P.param("live.dial", f"L{n + 1} Length", rx + 44, 42, *R["length"], len_d, short="Length", tab=0,
                          varname=name("length", n + 1))
@@ -485,7 +485,7 @@ def build_hub():
                          "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
         new_seed = P.obj("random 1000", lx + 200, Y + 820, ins=2)
         P.c(dice, new_seed); P.c(new_seed, seed)
-        evo = P.obj(f"pak {prob_d} {mut_d} {n + 1}", lx + 150, Y + 850, ins=3)
+        evo = P.obj(f"pak {prob_d} {mut_d} {d['seed']}", lx + 150, Y + 850, ins=3)
         to_evo = P.obj(f"prepend evolve {n}", lx + 150, Y + 880)
         for i, box in enumerate((prob, mut, seed)):
             P.c(box, evo, 0, i)

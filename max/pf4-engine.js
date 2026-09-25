@@ -231,14 +231,15 @@ var RANGES = {
   seed: [0, 999]
 };
 var LANE_DEFAULTS = [
-  { hits: 5, length: 8, pitchCycle: [0, 4, 2, 5], octave: 0 },
-  { hits: 3, length: 8, pitchCycle: [0, 2, 4], octave: -1 },
-  { hits: 2, length: 5, pitchCycle: [0, -3], octave: -2 },
-  { hits: 7, length: 12, pitchCycle: [4, 6, 7, 9, 11], octave: 0 }
+  { hits: 16, length: 16, pitchCycle: [0, 0, 7, 0, 5], octave: -2, accent: 15 },
+  { hits: 4, length: 16, rotate: 2, pitchCycle: [0, 3], octave: -1, gate: 30 },
+  { hits: 2, length: 7, rate: "1/4", pitchCycle: [0, 2, 4], gate: 100, velocity: 90 },
+  { hits: 5, length: 13, pitchCycle: [7, 9, 11, 12, 14], octave: 1, velocity: 85, mutation: 20 }
 ].map((lane, n) => ({
   rotate: 0,
   rate: "1/16",
   transpose: 0,
+  octave: 0,
   gate: 50,
   velocity: 100,
   accent: 0,
@@ -415,28 +416,44 @@ function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: repo
 
 // src/index.ts
 var RHYTHM_PRESETS = [
-  ["Khafif-e-ramal", 2, 5],
-  ["Cumbia", 3, 4],
-  ["Romanian folk", 3, 5],
-  ["Ruchenitza", 3, 7],
-  ["Tresillo", 3, 8],
-  ["Ruchenitza", 4, 7],
-  ["Aksak", 4, 9],
-  ["Outside Now", 4, 11],
-  ["York-Samai", 5, 6],
-  ["Nawakhat", 5, 7],
-  ["Cinquillo", 5, 8],
-  ["Agsag-Samai", 5, 9],
-  ["Moussorgsky", 5, 11],
-  ["Venda", 5, 12],
-  ["Bossa nova", 5, 16],
-  ["Tuareg", 7, 8],
-  ["West African bell", 7, 12],
-  ["Samba", 7, 16],
-  ["Central African", 9, 16],
-  ["Aka", 11, 24],
-  ["Aka upper sangha", 13, 24]
-].map(([name, hits, length]) => ({ name: `${name} ${hits}/${length}`, hits, length, rotate: 0 }));
+  // Electronic / Genre rhythms
+  { name: "Four-on-the-floor 4/16", hits: 4, length: 16, rotate: 0 },
+  { name: "Offbeat 4/16", hits: 4, length: 16, rotate: 2 },
+  { name: "Straight 16ths 16/16", hits: 16, length: 16, rotate: 0 },
+  { name: "Syncopated 5/16", hits: 5, length: 16, rotate: 0 },
+  { name: "3-against-4 3/16", hits: 3, length: 16, rotate: 0 },
+  { name: "Phase 12 8/12", hits: 8, length: 12, rotate: 0 },
+  { name: "Phase 13 8/13", hits: 8, length: 13, rotate: 0 },
+  // Traditional Euclidean rhythms (Toussaint 2005)
+  ...[
+    ["Khafif-e-ramal", 2, 5],
+    ["Cumbia", 3, 4],
+    ["Romanian folk", 3, 5],
+    ["Ruchenitza", 3, 7],
+    ["Tresillo", 3, 8],
+    ["Ruchenitza", 4, 7],
+    ["Aksak", 4, 9],
+    ["Outside Now", 4, 11],
+    ["York-Samai", 5, 6],
+    ["Nawakhat", 5, 7],
+    ["Cinquillo", 5, 8],
+    ["Agsag-Samai", 5, 9],
+    ["Moussorgsky", 5, 11],
+    ["Venda", 5, 12],
+    ["Bossa nova", 5, 16],
+    ["Tuareg", 7, 8],
+    ["West African bell", 7, 12],
+    ["Samba", 7, 16],
+    ["Central African", 9, 16],
+    ["Aka", 11, 24],
+    ["Aka upper sangha", 13, 24]
+  ].map(([name, hits, length]) => ({
+    name: `${name} ${hits}/${length}`,
+    hits,
+    length,
+    rotate: 0
+  }))
+];
 var RATE_TICKS = {
   "1/1": 1920,
   "1/2": 960,

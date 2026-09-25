@@ -36,14 +36,15 @@ export const RANGES = {
 
 /** Each Lane's settings in a new Hub. */
 export const LANE_DEFAULTS: LaneParams[] = [
-  { hits: 5, length: 8, pitchCycle: [0, 4, 2, 5], octave: 0 },
-  { hits: 3, length: 8, pitchCycle: [0, 2, 4], octave: -1 },
-  { hits: 2, length: 5, pitchCycle: [0, -3], octave: -2 },
-  { hits: 7, length: 12, pitchCycle: [4, 6, 7, 9, 11], octave: 0 },
+  { hits: 16, length: 16, pitchCycle: [0, 0, 7, 0, 5], octave: -2, accent: 15 },
+  { hits: 4, length: 16, rotate: 2, pitchCycle: [0, 3], octave: -1, gate: 30 },
+  { hits: 2, length: 7, rate: "1/4", pitchCycle: [0, 2, 4], gate: 100, velocity: 90 },
+  { hits: 5, length: 13, pitchCycle: [7, 9, 11, 12, 14], octave: 1, velocity: 85, mutation: 20 },
 ].map((lane, n) => ({
   rotate: 0,
   rate: "1/16",
   transpose: 0,
+  octave: 0,
   gate: 50,
   velocity: 100,
   accent: 0,
@@ -53,7 +54,7 @@ export const LANE_DEFAULTS: LaneParams[] = [
   groupMode: "poly",
   chordShape: "triad",
   ...lane,
-}));
+})) as LaneParams[];
 
 /** The Hub script's outlets, by what they carry. */
 export const HUB_OUTLETS = {

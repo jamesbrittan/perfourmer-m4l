@@ -6,9 +6,23 @@ import { inRange } from "./device";
 export { createScheduler, type PlayerCommand } from "./scheduler";
 export * from "./device";
 
-/** Named, known-good Euclidean rhythms (Toussaint 2005) a Lane can load as its Base. */
-export const RHYTHM_PRESETS = (
-  [
+/** Named, known-good Euclidean rhythms a Lane can load as its Base. */
+export const RHYTHM_PRESETS: readonly {
+  readonly name: string;
+  readonly hits: number;
+  readonly length: number;
+  readonly rotate: number;
+}[] = [
+  // Electronic / Genre rhythms
+  { name: "Four-on-the-floor 4/16", hits: 4, length: 16, rotate: 0 },
+  { name: "Offbeat 4/16", hits: 4, length: 16, rotate: 2 },
+  { name: "Straight 16ths 16/16", hits: 16, length: 16, rotate: 0 },
+  { name: "Syncopated 5/16", hits: 5, length: 16, rotate: 0 },
+  { name: "3-against-4 3/16", hits: 3, length: 16, rotate: 0 },
+  { name: "Phase 12 8/12", hits: 8, length: 12, rotate: 0 },
+  { name: "Phase 13 8/13", hits: 8, length: 13, rotate: 0 },
+  // Traditional Euclidean rhythms (Toussaint 2005)
+  ...([
     ["Khafif-e-ramal", 2, 5],
     ["Cumbia", 3, 4],
     ["Romanian folk", 3, 5],
@@ -30,8 +44,13 @@ export const RHYTHM_PRESETS = (
     ["Central African", 9, 16],
     ["Aka", 11, 24],
     ["Aka upper sangha", 13, 24],
-  ] as const
-).map(([name, hits, length]) => ({ name: `${name} ${hits}/${length}`, hits, length, rotate: 0 }));
+  ] as const).map(([name, hits, length]) => ({
+    name: `${name} ${hits}/${length}`,
+    hits,
+    length,
+    rotate: 0,
+  })),
+];
 
 /** tie: the note lasts right up to the next one (gap gate at 100%), so the two join legato. */
 export type Event = { onset: number; duration: number; pitch: number; velocity: number; voice: number; tie?: boolean };

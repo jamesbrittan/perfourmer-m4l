@@ -2,8 +2,17 @@ import { describe, expect, it } from "vitest";
 import { createEngine, RHYTHM_PRESETS } from "../src/index";
 import { asPattern } from "./helpers";
 
-// Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms" (2005)
-const PUBLISHED: Record<string, string> = {
+const EXPECTED_PATTERNS: Record<string, string> = {
+  // Electronic / Genre rhythms
+  "Four-on-the-floor 4/16": "x...x...x...x...",
+  "Offbeat 4/16": "..x...x...x...x.",
+  "Straight 16ths 16/16": "xxxxxxxxxxxxxxxx",
+  "Syncopated 5/16": "x..x..x..x..x...",
+  "3-against-4 3/16": "x....x....x.....",
+  "Phase 12 8/12": "x.xx.xx.xx.x",
+  "Phase 13 8/13": "x.xx.x.xx.x.x",
+
+  // Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms" (2005)
   "Khafif-e-ramal 2/5": "x.x..",
   "Cumbia 3/4": "x.xx",
   "Romanian folk 3/5": "x.x.x",
@@ -28,12 +37,12 @@ const PUBLISHED: Record<string, string> = {
 };
 
 describe("Rhythm Presets", () => {
-  it("are the published Euclidean rhythms, each rendering its published pattern at Rotate 0", () => {
-    expect(RHYTHM_PRESETS.map((p) => p.name)).toEqual(Object.keys(PUBLISHED));
-    for (const { name, hits, length } of RHYTHM_PRESETS) {
+  it("are the genre and published Euclidean rhythms, each rendering its expected pattern", () => {
+    expect(RHYTHM_PRESETS.map((p) => p.name)).toEqual(Object.keys(EXPECTED_PATTERNS));
+    for (const { name, hits, length, rotate } of RHYTHM_PRESETS) {
       const engine = createEngine();
-      engine.configure({ lanes: [{ hits, length, rotate: 0 }] });
-      expect([name, asPattern(engine.renderCycle(0, 0), length)]).toEqual([name, PUBLISHED[name]]);
+      engine.configure({ lanes: [{ hits, length, rotate }] });
+      expect([name, asPattern(engine.renderCycle(0, 0), length)]).toEqual([name, EXPECTED_PATTERNS[name]]);
     }
   });
 });

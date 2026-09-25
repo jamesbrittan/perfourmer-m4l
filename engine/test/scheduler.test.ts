@@ -83,7 +83,7 @@ describe("The player, fed by the scheduler", () => {
     it("while playing takes the Cycle sounding, which then repeats at Mutation 0", () => {
       const sim = simulate({
         play: [{ start: 0, ticks: CYCLE * 20 }],
-        setup: (c) => c.lane(0, { mutation: 127 }),
+        setup: (c) => c.lane(0, { hits: 5, length: 8, rate: "1/16", mutation: 127 }),
         edits: [
           { at: CYCLE * 10 + 400, fn: (c) => c.capture(0) },
           { at: CYCLE * 11 + 400, fn: (c) => c.lane(0, { mutation: 0 }) },
@@ -101,7 +101,7 @@ describe("The player, fed by the scheduler", () => {
           { start: CYCLE * 6 + 300, ticks: 2, stopped: (c) => (c.capture(0), c.lane(0, { mutation: 0 })) },
           { start: CYCLE * 12, ticks: CYCLE * 4 },
         ],
-        setup: (c) => c.lane(0, { mutation: 127 }),
+        setup: (c) => c.lane(0, { hits: 5, length: 8, rate: "1/16", mutation: 127 }),
       });
       const captured = heard(sim, 6);
       expect(captured.length).toBeGreaterThan(0);
