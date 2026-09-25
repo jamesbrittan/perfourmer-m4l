@@ -259,6 +259,7 @@ var CHORD_SHAPES = {
   octaves: [0, 7, 14, 21]
 };
 var LOWEST_BASS = 24;
+var VIEW_ROW = 16;
 var MIDDLE_C = 60;
 var CHANGE_LEAD = 240;
 var C_MAJOR = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
@@ -295,6 +296,8 @@ function createEngine() {
   let layoutChange = { from: voiceLayout, at: 0 };
   let ticksPerBar = 1920;
   let resetTicks = 0;
+  let basesChanged = 0;
+  const views = /* @__PURE__ */ new Map();
   const voiceDevices = /* @__PURE__ */ new Map();
   function cycleHits(lane, cycleIndex, evolve = true) {
     const { hits, length, rotate, pitchCycle = [0], seed = 0 } = lanes[lane];
@@ -479,8 +482,10 @@ function createEngine() {
       lanes = config.lanes;
       for (const [lane, entry] of captures) {
         const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
-        if (matches) entry.waiting = false;
-        else if (!entry.waiting) captures.delete(lane);
+        if (matches && entry.waiting) entry.waiting = false;
+        else if (!matches && !entry.waiting) captures.delete(lane);
+        else continue;
+        basesChanged++;
       }
       scale = config.scale ?? C_MAJOR;
       ticksPerBar = config.ticksPerBar ?? 1920;
@@ -521,11 +526,27 @@ function createEngine() {
     },
     cycleTable,
     slotTable,
-    /** Which of the Lane's steps sound in a Cycle (for display). */
-    hitSteps(lane, cycleIndex) {
-      const step = stepTicks(lane);
-      const onsets = new Set(cycleHits(lane, cycleIndex).map((h) => Math.round(h.onset / step)));
-      return Array.from({ length: lanes[lane].length }, (_, i) => onsets.has(i));
+    /** What the Lane shows at a song position (the pattern view and readouts). The Cycle is worked out once and
+     * kept until it or the Lane's settings change, so polling is cheap. */
+    laneView(lane, songTicks) {
+      const { cycleIndex, offsetTicks } = locate(lane, songTicks);
+      const step = Math.floor(offsetTicks / stepTicks(lane));
+      const key = `${cycleIndex}|${resetTicks}|${basesChanged}|${JSON.stringify(lanes[lane])}`;
+      const cached = views.get(lane);
+      if (cached?.key === key) return { ...cached.view, step };
+      const heard = cycleHits(lane, cycleIndex);
+      const onsets = new Set(heard.map((h) => Math.round(h.onset / stepTicks(lane))));
+      const steps = Array.from({ length: lanes[lane].length }, (_, i) => onsets.has(i));
+      const rows = [];
+      for (let i = 0; i < steps.length; i += VIEW_ROW) rows.push(steps.slice(i, i + VIEW_ROW));
+      const view = {
+        cycleIndex,
+        rows,
+        mutated: JSON.stringify(heard) !== JSON.stringify(cycleHits(lane, cycleIndex, false)),
+        captureDepth: active(lane)?.stack.length ?? 0
+      };
+      views.set(lane, { key, view });
+      return { ...view, step };
     },
     /** Make the Cycle's sounding pattern the Lane's new Base (the previous one is kept for Revert). */
     capture(lane, cycleIndex) {
@@ -540,20 +561,18 @@ function createEngine() {
       const entry = active(lane) ?? { signature: signature(lanes[lane]), stack: [] };
       entry.stack.push({ steps, degrees });
       captures.set(lane, entry);
+      basesChanged++;
     },
     /** Go back to the Base from before the last Capture. */
     revert(lane) {
       const entry = active(lane);
       entry?.stack.pop();
       if (entry && !entry.stack.length) captures.delete(lane);
+      basesChanged++;
     },
     /** How many Captured Bases the Lane has (Revert steps back through them); 0 = its Euclidean pattern. */
     captureDepth(lane) {
       return active(lane)?.stack.length ?? 0;
-    },
-    /** Whether Mutation or probability make the Cycle depart from the Base. */
-    isMutated(lane, cycleIndex) {
-      return JSON.stringify(cycleHits(lane, cycleIndex)) !== JSON.stringify(cycleHits(lane, cycleIndex, false));
     },
     /** Every Lane's Captured Bases as plain numbers, for storing with the set. */
     saveBases() {
@@ -566,6 +585,7 @@ function createEngine() {
     },
     loadBases(data) {
       captures.clear();
+      basesChanged++;
       if (data[0] !== 1) return;
       let i = 2;
       for (let n = 0; n < data[1]; n++) {
