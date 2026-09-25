@@ -214,7 +214,7 @@ class Patch:
             "appversion": {"major": 9, "minor": 1, "revision": 5, "architecture": "x64", "modernui": 1},
             "classnamespace": "box", "rect": [100, 100, 1100, 800],
             "openrect": [0.0, 0.0, float(width), 169.0], "openrectmode": 0,
-            "default_fontsize": 10.0, "default_fontname": "Arial Bold", "gridsize": [8.0, 8.0],
+            "default_fontsize": 10.0, "default_fontname": "Ableton Sans Medium", "gridsize": [8.0, 8.0],
             "latency": 0, "is_mpe": 0,
             "project": {"version": 1, "contents": {"patchers": {}}, "layout": {}, "searchpath": {},
                         "amxdtype": 1835887981,  # 'mmmm' = MIDI effect
@@ -392,7 +392,8 @@ def build_hub():
         vy = row_y   # row Y in voicing tab (tab 5)
         lx = 200 + 300 * n  # this Lane's logic column
 
-        # Permanent Left: Lane label & broad 252px Pattern glyphs (monospace Menlo 9.0pt, spaced, 16 steps/line)
+        # Permanent Left: Lane label & broad 252px Pattern glyphs (16 steps/line). Menlo on purpose: the steps must line
+        # up in columns across Lanes, and Ableton Sans gives ● and · different widths; all other text is Ableton Sans
         P.comment(f"L{n + 1}", 6, ry + 3, 18)
         initial_dots = " ".join(["·"] * min(16, len_d))
         view = P.add("comment", 28, ry, w=252, h=20, text=initial_dots,
