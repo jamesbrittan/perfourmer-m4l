@@ -1,3 +1,6 @@
+import { uniformInt } from "pure-rand/distribution/uniformInt";
+import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus";
+
 /** tie: the note lasts right up to the next one (gap gate at 100%), so the two join legato. */
 export type Event = { onset: number; duration: number; pitch: number; velocity: number; voice: number; tie?: boolean };
 /** Step length in ticks at 480 PPQ, slowest first. Q = quintuplet, T = triplet, S = septuplet. */
@@ -21,7 +24,9 @@ export const RATES = Object.keys(RATE_TICKS) as Rate[];
 /** pitchCycle: scale degrees, one per hit (0 = the Scale's root nearest middle C), shifted by transpose
  * degrees and octave octaves. gate runs from short to tied: up to 50% it is that percentage of one step; from 50%
  * to 100% the note stretches from half a step to the whole gap to the next hit, and at 100% it ties into the next.
- * accent: velocity added to the first hit of each Cycle (0 = none). */
+ * accent: velocity added to the first hit of each Cycle (0 = none).
+ * probability: % chance each hit sounds; mutation: 0 (the Base every Cycle) to 127 (a new pattern every Cycle);
+ * seed: picks the path Mutation and probability take. */
 export type LaneParams = {
   hits: number;
   length: number;
@@ -30,6 +35,9 @@ export type LaneParams = {
   pitchCycle?: number[];
   transpose?: number;
   octave?: number;
+  probability?: number;
+  mutation?: number;
+  seed?: number;
   gate?: number;
   velocity?: number;
   accent?: number;
@@ -64,6 +72,9 @@ function bjorklund(hits: number, length: number): boolean[] {
 
 type Note = Omit<Event, "voice">;
 
+/** One RNG seed per (Lane seed, Cycle). */
+const mix = (seed: number, cycleIndex: number) => (Math.imul(seed + 1, 0x9e3779b1) ^ Math.imul(cycleIndex + 1, 0x85ebca6b)) | 0;
+
 const clampToMidi = (note: number) => Math.max(0, Math.min(127, note));
 
 /** A scale degree as a MIDI note: degrees past the Scale's last note carry on into the next octave. */
@@ -84,26 +95,54 @@ export function createEngine() {
   let resetTicks = 0; // 0 = Lanes never realign
   const voiceDevices = new Map<number, number>(); // Voice device id -> Voice number
 
-  function renderCycle(lane: number, cycleIndex: number): Event[] {
-    const { hits, length, rotate, pitchCycle = [0], transpose = 0, octave = 0 } = lanes[lane];
-    const { gate = 50, velocity = 100, accent = 0 } = lanes[lane];
+  /**
+   * The hits that sound in a Cycle, as onsets and scale degrees (before transpose). Each Cycle starts again from
+   * the Base (Euclidean pattern + Pitch Cycle): with probability mutation/127, each step is re-decided (a hit with
+   * the Base's density, hits/length) and each hit's degree is redrawn within the Pitch Cycle's range ±3 degrees;
+   * then each hit sounds with the Lane's probability. The draws come from an RNG seeded by (seed, cycleIndex), a
+   * fixed number per step, so a Cycle is reproducible from song position whatever the other settings.
+   */
+  function cycleHits(lane: number, cycleIndex: number): { onset: number; degree: number }[] {
+    const { hits, length, rotate, pitchCycle = [0], mutation = 0, probability = 100, seed = 0 } = lanes[lane];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
-    const rotated = pattern.map((_, step) => pattern[(step - shift + length) % length]);
+    const base = pattern.map((_, step) => pattern[(step - shift + length) % length]);
+    const rng = xoroshiro128plus(mix(seed, cycleIndex));
+    const chance = () => uniformInt(rng, 0, 99999) / 100000;
+    const [lo, hi] = [Math.min(...pitchCycle) - 3, Math.max(...pitchCycle) + 3];
+    const baseHits = base.filter(Boolean).length;
+    let hitIndex = cyclesSinceReset(lane, cycleIndex) * baseHits; // the Pitch Cycle realigns at each Reset
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
-    const patternOnsets = rotated.flatMap((hit, i) => (hit ? [i * step] : []));
-    const onsets = patternOnsets.filter((onset) => onset < end - 1e-6); // hits from a Reset cut on are never reached
+    const sounding: { onset: number; degree: number }[] = [];
+    base.forEach((isHit, i) => {
+      const [stepDraw, hitDraw, pitchDraw, degreeDraw, soundDraw] = [chance(), chance(), chance(), chance(), chance()];
+      const hit = stepDraw < mutation / 127 ? hitDraw < hits / length : isHit;
+      if (!hit) return;
+      const baseDegree = pitchCycle[hitIndex++ % pitchCycle.length];
+      const degree = pitchDraw < mutation / 127 ? lo + Math.floor(degreeDraw * (hi - lo + 1)) : baseDegree;
+      const onset = i * step;
+      // a dropped hit still uses up its Pitch Cycle step; hits from a Reset cut on are never reached
+      if (soundDraw * 100 < probability && onset < end - 1e-6) sounding.push({ onset, degree });
+    });
+    return sounding;
+  }
+
+  function renderCycle(lane: number, cycleIndex: number): Event[] {
+    const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0 } = lanes[lane];
+    const step = stepTicks(lane);
+    const end = playedTicks(lane, cycleIndex);
+    const sounding = cycleHits(lane, cycleIndex);
     // the gap after the last hit runs to the next Cycle's first hit
-    const gaps = onsets.map((onset, i) => (i + 1 < onsets.length ? onsets[i + 1] : end + patternOnsets[0]) - onset);
+    const next = cycleHits(lane, cycleIndex + 1)[0]?.onset ?? playedTicks(lane, cycleIndex + 1);
+    const gaps = sounding.map(({ onset }, i) => (i + 1 < sounding.length ? sounding[i + 1].onset : end + next) - onset);
     const tie = gate >= 100;
     const noteLength = (gap: number) =>
       gate <= 50 ? (step * gate) / 100 : step / 2 + ((gap - step / 2) * (gate - 50)) / 50; // short … half a step … tied
-    const hitsBefore = cyclesSinceReset(lane, cycleIndex) * patternOnsets.length; // the Pitch Cycle realigns at each Reset
-    const notes = onsets.map((onset, hit) => ({
+    const notes = sounding.map(({ onset, degree }, hit) => ({
       onset,
       duration: noteLength(gaps[hit]),
-      pitch: clampToMidi(degreeToNote(pitchCycle[(hitsBefore + hit) % pitchCycle.length] + transpose, scale) + 12 * octave),
+      pitch: clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave),
       velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
       ...(tie && { tie }),
     }));
