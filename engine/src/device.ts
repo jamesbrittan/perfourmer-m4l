@@ -74,6 +74,7 @@ export const HUB_OUTLETS = {
   releaseVoices: 12, // "<lane> <voice> …" the Voices the player releases for that Lane
   script: 13, // scripting messages to thispatcher
   frozen: 14, // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
+  controls: 15, // "<lane> <control> <value>" to move a Lane's controls (Randomise and its Undo)
 } as const;
 
 /** How a Lane's Freeze is stored with the set: off, holding its Base (after a Capture while frozen), or the Cycle. */
@@ -106,6 +107,43 @@ export function inRange(lane: Partial<LaneParams>): Partial<LaneParams> {
   if (out.pitchCycle) {
     const degrees = out.pitchCycle.slice(0, PITCH_STEPS).map((d) => clamp(d, RANGES.degree));
     out.pitchCycle = degrees.length ? degrees : [0];
+  }
+  return out;
+}
+
+/** Parameter groups a Randomise button rolls. */
+export type RandomGroup = "rhythm" | "pitch" | "evolution";
+export const RANDOM_GROUPS: RandomGroup[] = ["rhythm", "pitch", "evolution"];
+
+/**
+ * New values for a Lane's groups, kept musically usable rather than spanning the full ranges: Length 3–16, Hits 1 to
+ * Length, Rate 1/8 or 1/16 (mostly straight), a Pitch Cycle of 2–6 degrees within ±5 of the Lane's current register,
+ * Probability 70–100 and Mutation 0–60 (Mutation then evolves from there). Gate, Velocity and the LFOs aren't touched.
+ * `random` returns [0, 1), like Math.random.
+ */
+export function randomSettings(current: LaneParams, groups: RandomGroup[], random: () => number): Partial<LaneParams> {
+  const int = (lo: number, hi: number) => lo + Math.floor(random() * (hi - lo + 1));
+  const pick = <T>(choices: readonly T[]) => choices[Math.floor(random() * choices.length)];
+  const out: Partial<LaneParams> = {};
+  if (groups.includes("rhythm")) {
+    const length = int(3, 16);
+    out.length = length;
+    out.hits = int(1, length);
+    out.rotate = int(0, length - 1);
+    out.rate = pick(["1/8", "1/16"] as const);
+    out.feel = pick(["straight", "straight", "straight", "straight", "triplet", "dotted"] as const);
+  }
+  if (groups.includes("pitch")) {
+    const degrees = current.pitchCycle ?? [0];
+    const centre = Math.round(degrees.reduce((a, b) => a + b, 0) / degrees.length);
+    const [lo, hi] = RANGES.degree;
+    const around = [Math.max(lo, centre - 5), Math.min(hi, centre + 5)] as const;
+    out.pitchCycle = Array.from({ length: int(2, 6) }, () => int(...around));
+  }
+  if (groups.includes("evolution")) {
+    out.probability = int(70, 100);
+    out.mutation = int(0, 60);
+    out.seed = int(0, RANGES.seed[1]);
   }
   return out;
 }
