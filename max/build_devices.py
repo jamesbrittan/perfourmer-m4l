@@ -337,9 +337,8 @@ def build_hub():
                      parameter_enable=1, saved_attribute_attributes={"valueof": {
                          "parameter_longname": f"L{n + 1} New Seed", "parameter_shortname": "New Seed",
                          "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
-        roll = P.obj("sel 1", lx + 150, Y + 820, ins=2, outs=2)
         new_seed = P.obj("random 1000", lx + 200, Y + 820, ins=2)
-        P.c(dice, roll); P.c(roll, new_seed); P.c(new_seed, seed)
+        P.c(dice, new_seed); P.c(new_seed, seed)  # a live.text button sends a bang, not 1
         evo = P.obj(f"pak {prob_d} {mut_d} {n + 1}", lx + 150, Y + 850, ins=3)
         to_evo = P.obj(f"prepend evolve {n}", lx + 150, Y + 880)
         for i, box in enumerate((prob, mut, seed)):
