@@ -209,6 +209,13 @@ export function createEngine() {
   // The Voice Layout a change replaced, and the song tick the change lands on: notes starting earlier use `from`,
   // and any still sounding there end there. `from` is the current layout once the change is retired.
   let layoutChange: { from: VoiceLayout; at: number } = { from: voiceLayout, at: 0 };
+  // Every Voice each Lane may still be sounding on while changes are in play: a change can replace one that has
+  // already landed (the song position it's judged from lags the player), so the layouts in between count too.
+  let reach: VoiceLayout = voiceLayout;
+  const union = (...layouts: VoiceLayout[]) =>
+    Array.from({ length: Math.max(...layouts.map((l) => l.length)) }, (_, n) =>
+      [...new Set(layouts.flatMap((l) => l[n] ?? []))].sort((a, b) => a - b),
+    );
   let ticksPerBar = 1920;
   let resetBars = 0;
   let resetTicks = 0; // 0 = Lanes never realign
@@ -336,10 +343,13 @@ export function createEngine() {
   /** Change the Voice Layout: at once while stopped (songTicks undefined), else on the next bar far enough ahead.
    * A change on top of one that hasn't landed yet replaces it, from the layout still sounding. */
   function changeLayout(next: VoiceLayout, songTicks?: number) {
-    if (songTicks === undefined) layoutChange = { from: next, at: 0 };
-    else {
+    if (songTicks === undefined) {
+      layoutChange = { from: next, at: 0 };
+      reach = next;
+    } else {
       let at = (Math.floor(songTicks / ticksPerBar) + 1) * ticksPerBar;
       if (at - songTicks < CHANGE_LEAD) at += ticksPerBar;
+      reach = union(reach, layoutChange.from, voiceLayout, next);
       layoutChange = { from: songTicks < layoutChange.at ? layoutChange.from : voiceLayout, at };
     }
     voiceLayout = next;
@@ -533,15 +543,18 @@ export function createEngine() {
     setVoiceLayout(layout: VoiceLayout, songTicks?: number) {
       changeLayout(layout.map((voices) => [...voices]), songTicks);
     },
-    /** The Voices a Lane's player must release: its own, plus those it gave up in a change that hasn't landed. */
+    /** The Voices a Lane's player must release: its own, plus any it had in the layouts changes have replaced since
+     * the last one was retired. */
     releaseVoices(lane: number): number[] {
-      return [...new Set([...(layoutChange.from[lane] ?? []), ...laneVoices(lane)])].sort((a, b) => a - b);
+      return [...(reach[lane] ?? [])];
     },
     /** Forget the Voice Layout a change replaced once the bar it landed on has played (a jump back in the song
      * then hears the new layout). Returns whether it did, i.e. whether releaseVoices may have changed. */
     retireVoiceLayout(songTicks: number): boolean {
-      if (layoutChange.from === voiceLayout || songTicks < layoutChange.at + ticksPerBar) return false;
+      if ((layoutChange.from === voiceLayout && reach === voiceLayout) || songTicks < layoutChange.at + ticksPerBar)
+        return false;
       layoutChange = { from: voiceLayout, at: 0 };
+      reach = voiceLayout;
       return true;
     },
     cycleTable,

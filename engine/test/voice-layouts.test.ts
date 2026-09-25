@@ -197,6 +197,28 @@ describe("Changing the Voice Layout while playing", () => {
   });
 });
 
+describe("Releasing a Lane during Voice Layout changes", () => {
+  it("covers every Voice the Lane may still sound on, even when a change replaces one that may have landed", () => {
+    const engine = fourLanes();
+    engine.setVoice(0, 4, true); // stopped: Lane 4 has no Voices
+    engine.setVoice(3, 4, true, 100); // Lane 4 takes Voice 4 at the bar at 1920 …
+    // … and plays a note on it there; the next click comes from a song position polled just before that bar
+    engine.setVoice(3, 4, false, 1800);
+    expect(engine.releaseVoices(3)).toEqual([4]);
+    expect(engine.releaseVoices(0)).toEqual([1, 4]);
+  });
+
+  it("goes back to the Lane's own Voices once the changes are retired", () => {
+    const engine = fourLanes();
+    engine.setVoice(0, 4, true);
+    engine.setVoice(3, 4, true, 100);
+    engine.setVoice(3, 4, false, 1800);
+    expect(engine.retireVoiceLayout(3840 + 1920)).toBe(true);
+    expect(engine.releaseVoices(3)).toEqual([]);
+    expect(engine.releaseVoices(0)).toEqual([1]); // Voice 4 went to Lane 4, then to no Lane
+  });
+});
+
 describe("Changing the Voice Layout while stopped", () => {
   it("takes effect at once", () => {
     const engine = fourLanes({ hits: 2, length: 8, groupMode: "unison" });
