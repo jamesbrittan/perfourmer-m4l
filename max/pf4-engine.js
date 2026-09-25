@@ -32,6 +32,7 @@ __export(index_exports, {
   PITCH_STEPS: () => PITCH_STEPS,
   PLAYER: () => PLAYER,
   PLAYER_POSITION: () => PLAYER_POSITION,
+  RANDOM_GROUPS: () => RANDOM_GROUPS,
   RANGES: () => RANGES,
   RATES: () => RATES,
   RHYTHM_PRESETS: () => RHYTHM_PRESETS,
@@ -41,7 +42,8 @@ __export(index_exports, {
   controlName: () => controlName,
   createEngine: () => createEngine,
   createScheduler: () => createScheduler,
-  inRange: () => inRange
+  inRange: () => inRange,
+  randomSettings: () => randomSettings
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -282,8 +284,10 @@ var HUB_OUTLETS = {
   // "<lane> <voice> …" the Voices the player releases for that Lane
   script: 13,
   // scripting messages to thispatcher
-  frozen: 14
+  frozen: 14,
   // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
+  controls: 15
+  // "<lane> <control> <value>" to move a Lane's controls (Randomise and its Undo)
 };
 var FREEZE_OFF = -1;
 var FREEZE_BASE = -2;
@@ -307,6 +311,33 @@ function inRange(lane) {
   if (out.pitchCycle) {
     const degrees = out.pitchCycle.slice(0, PITCH_STEPS).map((d) => clamp(d, RANGES.degree));
     out.pitchCycle = degrees.length ? degrees : [0];
+  }
+  return out;
+}
+var RANDOM_GROUPS = ["rhythm", "pitch", "evolution"];
+function randomSettings(current, groups, random) {
+  const int = (lo, hi) => lo + Math.floor(random() * (hi - lo + 1));
+  const pick = (choices) => choices[Math.floor(random() * choices.length)];
+  const out = {};
+  if (groups.includes("rhythm")) {
+    const length = int(3, 16);
+    out.length = length;
+    out.hits = int(1, length);
+    out.rotate = int(0, length - 1);
+    out.rate = pick(["1/8", "1/16"]);
+    out.feel = pick(["straight", "straight", "straight", "straight", "triplet", "dotted"]);
+  }
+  if (groups.includes("pitch")) {
+    const degrees = current.pitchCycle ?? [0];
+    const centre = Math.round(degrees.reduce((a, b) => a + b, 0) / degrees.length);
+    const [lo, hi] = RANGES.degree;
+    const around = [Math.max(lo, centre - 5), Math.min(hi, centre + 5)];
+    out.pitchCycle = Array.from({ length: int(2, 6) }, () => int(...around));
+  }
+  if (groups.includes("evolution")) {
+    out.probability = int(70, 100);
+    out.mutation = int(0, 60);
+    out.seed = int(0, RANGES.seed[1]);
   }
   return out;
 }

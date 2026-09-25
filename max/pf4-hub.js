@@ -21,6 +21,9 @@ const {
   VOICES,
   FREEZE_OFF,
   FREEZE_BASE,
+  PITCH_STEPS,
+  RANDOM_GROUPS,
+  randomSettings,
 } = require("pf4-engine.js");
 
 outlets = Object.keys(OUT).length; // what each carries: HUB_OUTLETS in the engine
@@ -209,6 +212,44 @@ function frozen(...data) {
     engine.setLane(n, { freeze: fromStored(value) ?? scheduler.captureCycle(n) });
     refresh(n);
   });
+}
+
+// Randomise: new values for one of a Lane's groups ("rhythm", "pitch" or "evolution"), or all three ("lane"); Lane -1
+// = every Lane. The values are set on the controls themselves, so they're saved with the set, show in automation and
+// reach the engine as a turn of the knobs would. Undo puts back the controls from before the Lane's last roll.
+const beforeRoll = Array.from({ length: LANES }, () => null);
+function randomise(n, group) {
+  if (n < 0) {
+    for (let m = 0; m < LANES; m++) randomise(m, "lane");
+    return;
+  }
+  const current = engine.laneSettings(n);
+  const next = randomSettings(current, group === "lane" ? RANDOM_GROUPS : [group], Math.random);
+  beforeRoll[n] = Object.fromEntries(Object.keys(next).map((key) => [key, current[key]]));
+  setControls(n, next);
+}
+
+function undo(n) {
+  const back = beforeRoll[n];
+  beforeRoll[n] = null;
+  if (back) setControls(n, back);
+}
+
+function setControls(n, settings) {
+  const send = (control, ...values) => outlet(OUT.controls, n, control, ...values);
+  const { length, hits, rotate, rate, feel, pitchCycle, probability, mutation, seed } = settings;
+  if (length !== undefined) send("length", length); // before Hits, whose range follows Length
+  if (hits !== undefined) send("hits", hits);
+  if (rotate !== undefined) send("rotate", rotate);
+  if (STRAIGHT_RATES.includes(rate)) send("rate", STRAIGHT_RATES.indexOf(rate));
+  if (FEELS.includes(feel)) send("feel", FEELS.indexOf(feel));
+  if (pitchCycle) {
+    pitchCycle.slice(0, PITCH_STEPS).forEach((degree, i) => send("degree", i, degree));
+    send("pitchLength", Math.min(pitchCycle.length, PITCH_STEPS));
+  }
+  if (probability !== undefined) send("probability", probability);
+  if (mutation !== undefined) send("mutation", mutation);
+  if (seed !== undefined) send("seed", seed);
 }
 
 // Group Mode and Chord Shape (menu indices): from the Lane's next Cycle

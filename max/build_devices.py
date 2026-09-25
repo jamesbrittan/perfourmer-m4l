@@ -75,6 +75,15 @@ HELP = {
     "Capture": ("Capture", "Makes the Cycle playing now the Lane's Base, so Mutation 0 repeats it and Mutation "
                 "departs from it. Revert undoes it."),
     "Revert": ("Revert", "Goes back to the Base from before the last Capture."),
+    "Randomise": ("Randomise Lane", "Rolls new values for the Lane's rhythm, Pitch Cycle and evolution, kept musical "
+                  "(Length 3–16, Rate 1/8 or 1/16, degrees near the Lane's register, Mutation 0–60). Gate, Velocity "
+                  "and the LFOs stay. Moves the controls, so Undo, automation and the set all see the new values."),
+    "Randomise Rhythm": ("Randomise Rhythm", "Rolls new Hits, Length (3–16), Rotate, Rate (1/8 or 1/16) and Feel."),
+    "Randomise Pitch": ("Randomise Pitch Cycle", "Rolls a new Pitch Cycle of 2–6 degrees near the Lane's register."),
+    "Randomise Evolution": ("Randomise Evolution", "Rolls new Probability (70–100), Mutation (0–60) and Seed."),
+    "Undo Randomise": ("Undo Randomise", "Puts back the Lane's controls from before its last Randomise."),
+    "Randomise All": ("Randomise All", "Rolls new rhythm, Pitch Cycle and evolution values for every Lane. Each Lane's "
+                      "Undo puts its own back."),
     "Freeze": ("Freeze", "Holds the Cycle playing now: from the next Cycle the Lane repeats it exactly, without "
                "changing Mutation. Turn it off to evolve again from where the song is. Freeze is for performing; "
                "Capture keeps a pattern as the Lane's Base. Capture while frozen makes the held Cycle the Base and "
@@ -284,6 +293,19 @@ def steppers(P, target, minus, plus, lx, ly, tab):
         P.c(target, current, 0, 1); P.c(button, current); P.c(current, step); P.c(step, target)
 
 
+def action_button(P, name, short, text, x, y, w, h, message, adapter, mx, my, tab=None, fontsize=None):
+    """A momentary button (a parameter, so it can be mapped, e.g. to an E16 button) that sends `message` to the Hub
+    script; live.text in button mode outputs a bang, which fires the message box."""
+    extra = {"fontsize": fontsize} if fontsize else {}
+    button = P.add("live.text", x, y, w=w, h=h, ins=1, outs=2, text=text, texton=text, mode=0, parameter_enable=1,
+                   tab=tab, saved_attribute_attributes={"valueof": {
+                       "parameter_longname": name, "parameter_shortname": short,
+                       "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}}, **extra)
+    action = P.msg(message, mx, my)
+    P.c(button, action); P.c(action, adapter)
+    return button
+
+
 def build_hub():
     P = Patch()
     Y = 220  # logic lives below the visible 169px device area
@@ -317,6 +339,10 @@ def build_hub():
     P.comment("bars", 76, 12, 28)
     reset_msg = P.obj("prepend reset", 700, Y - 30)
     P.c(reset, reset_msg); P.c(reset_msg, adapter)
+    action_button(P, "Randomise All", "Rand All", "⚄ All", 200, 10, 40, 18, "randomise -1 lane", adapter, 800, Y - 30)
+    # Randomise and Undo: move a Lane's controls ("<lane> <control> <value>")
+    control_lanes = P.obj(lanes_route(), 1300, Y + 270, ins=2, outs=LANES + 1)
+    P.c(adapter, control_lanes, OUT["controls"])
 
     # Section header
     P.comment("Pattern", 28, 32, 50)
@@ -438,11 +464,16 @@ def build_hub():
         # up in columns across Lanes, and Ableton Sans gives ● and · different widths; all other text is Ableton Sans
         P.comment(f"L{n + 1}", 6, ry + 3, 18)
         initial_dots = " ".join(["·"] * min(16, len_d))
-        view = P.add("comment", 28, ry, w=252, h=20, text=initial_dots,
+        view = P.add("comment", 28, ry, w=212, h=20, text=initial_dots,
                      fontname="Menlo", fontsize=9.0, ins=1, outs=0)
         P.c(patterns, view, n)
         if n < LANES - 1:
             P.add("live.line", 6, ry + 25, w=268, h=2, ins=1, outs=0)
+
+        action_button(P, f"L{n + 1} Randomise", "Rand", "⚄", 242, ry + 1, 18, 18, f"randomise {n} lane", adapter,
+                      lx, Y + 1100, fontsize=12.0)
+        action_button(P, f"L{n + 1} Undo Randomise", "Undo", "↶", 262, ry + 1, 18, 18, f"undo {n}", adapter,
+                      lx + 90, Y + 1100)
 
         # --- Tab 0: Rhythm (4 columns side-by-side, 90px each)
         rx = 285 + 90 * n
@@ -460,7 +491,9 @@ def build_hub():
                        enum=[FEEL_LABELS[f] for f in FEELS], tab=0, varname=name("feel", n + 1), fontsize=8.0)
         for k, (dial, sx, sy) in enumerate(((hits, rx, 83), (length, rx + 44, 83), (rotate, rx, 137))):
             steppers(P, dial, (sx + 2, sy, 19, 11), (sx + 23, sy, 19, 11), lx + 90 * k, Y + 1000, tab=0)
-        menu = P.param("live.menu", f"L{n + 1} Rhythm", rx, 151, 0, 0, 0, w=88, h=16, short="Rhythm", enum=presets,
+        action_button(P, f"L{n + 1} Randomise Rhythm", "Rand Rhy", "⚄", rx + 72, 151, 16, 16, f"randomise {n} rhythm",
+                      adapter, lx + 180, Y + 1100, tab=0, fontsize=11.0)
+        menu = P.param("live.menu", f"L{n + 1} Rhythm", rx, 151, 0, 0, 0, w=70, h=16, short="Rhythm", enum=presets,
                        tab=0, varname=name("rhythm", n + 1))
         to_rhythm = P.obj(f"prepend rhythm {n}", lx, Y + 910)
         P.c(menu, to_rhythm); P.c(to_rhythm, adapter); P.c(preset_menus, menu, n)
@@ -470,7 +503,9 @@ def build_hub():
 
         # --- Tab 1: Pitch Cycle editor
         degrees, octave = d["pitchCycle"], d["octave"]
-        P.comment(f"L{n + 1}", 285, ty, 20, tab=1)
+        # the rows line up with the Lanes in the pattern view, so the Lane label's place holds the Pitch dice
+        action_button(P, f"L{n + 1} Randomise Pitch", "Rand Pit", "⚄", 285, ty, 18, 18, f"randomise {n} pitch", adapter,
+                      lx + 270, Y + 1100, tab=1, fontsize=12.0)
         plen = P.param("live.numbox", f"L{n + 1} Pitch Length", 306, ty, 1, PITCH_STEPS, len(degrees),
                        w=26, h=18, short="Len", tab=1)
         steps = [P.param("live.numbox", f"L{n + 1} Degree {i + 1}", 336 + 23 * i, ty, *R["degree"],
@@ -511,7 +546,8 @@ def build_hub():
 
         # --- Tab 3: Evolution & Capture (Evolve)
         prob_d, mut_d = d["probability"], d["mutation"]
-        P.comment(f"L{n + 1}", 285, ty, 20, tab=3)
+        action_button(P, f"L{n + 1} Randomise Evolution", "Rand Evo", "⚄", 285, ty, 18, 18,
+                      f"randomise {n} evolution", adapter, lx + 360, Y + 1100, tab=3, fontsize=12.0)
         prob = P.param("live.numbox", f"L{n + 1} Probability", 310, ty, *R["probability"], prob_d, w=36, h=18, short="Prob %", tab=3)
         mut = P.param("live.numbox", f"L{n + 1} Mutation", 352, ty, *R["mutation"], mut_d, w=36, h=18, short="Mutate", tab=3)
         seed = P.param("live.numbox", f"L{n + 1} Seed", 394, ty, *R["seed"], d["seed"], w=32, h=18, short="Seed",
@@ -598,6 +634,19 @@ def build_hub():
         P.c(hits, lane, 0, 0); P.c(len_t, lane, 0, 1); P.c(rotate, lane, 0, 2); P.c(rate, lane, 0, 3)
         P.c(feel, lane, 0, 4)
         P.c(lane, prep); P.c(prep, adapter)
+
+        # Randomise / Undo: "<control> <value>" for this Lane, to the controls themselves
+        names = ["length", "hits", "rotate", "rate", "feel", "degree", "pitchLength", "probability", "mutation", "seed"]
+        to_control = P.obj("route " + " ".join(names), lx, Y + 1130, ins=2, outs=len(names) + 1)
+        P.c(control_lanes, to_control, n)
+        for i, box in enumerate((length, hits, rotate, rate, feel, None, plen, prob, mut, seed)):
+            if box:
+                P.c(to_control, box, i)
+        to_degree = P.obj("route " + " ".join(str(i) for i in range(PITCH_STEPS)), lx, Y + 1160, ins=2,
+                          outs=PITCH_STEPS + 1)
+        P.c(to_control, to_degree, names.index("degree"))
+        for i, step in enumerate(steps):
+            P.c(to_degree, step, i)
 
         # pending bank, Cycle length (fractional for odd rates), "now" flag (take it up at the next tick) and
         # "release" flag (release the Voice on taking it up), held until adopted
