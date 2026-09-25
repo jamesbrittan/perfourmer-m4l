@@ -1,6 +1,8 @@
 import { uniformInt } from "pure-rand/distribution/uniformInt";
 import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus";
 
+export { createScheduler, type PlayerCommand } from "./scheduler";
+
 /** Named, known-good Euclidean rhythms (Toussaint 2005) a Lane can load as its Base. */
 export const RHYTHM_PRESETS = (
   [
@@ -443,6 +445,8 @@ export function createEngine() {
       resetTicks = (config.resetBars ?? 0) * ticksPerBar;
     },
     cycleTicks,
+    /** The Reset period in ticks (0 = no Reset). */
+    resetTicks: () => resetTicks,
     locate,
     renderCycle,
     /** The Voices a Lane drives (after any pending Voice Layout change). */

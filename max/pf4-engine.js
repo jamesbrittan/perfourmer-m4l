@@ -25,7 +25,8 @@ __export(index_exports, {
   RATES: () => RATES,
   RHYTHM_PRESETS: () => RHYTHM_PRESETS,
   SPLITS: () => SPLITS,
-  createEngine: () => createEngine
+  createEngine: () => createEngine,
+  createScheduler: () => createScheduler
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -196,6 +197,117 @@ var XoroShiro128Plus = class XoroShiro128Plus2 {
 };
 function xoroshiro128plus(seed) {
   return new XoroShiro128Plus(-1, ~seed, seed | 0, 0);
+}
+
+// src/scheduler.ts
+var EMPTY = { slots: [], carry: [] };
+function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: reported, send }) {
+  const each = (make) => Array.from({ length: lanes }, make);
+  const emptyBank = () => ({ cycle: 0, keys: [], table: EMPTY, carried: [], frame: "" });
+  const banks = each(() => [emptyBank(), emptyBank()]);
+  const offered = each(() => -1);
+  const adoptedAt = each(() => null);
+  let polledAt = 0;
+  let playing = false;
+  function playingBank(n) {
+    const bank = reported(n);
+    return bank === 0 || bank === 1 ? bank : 1;
+  }
+  const playingCycle = (n) => banks[n][playingBank(n)].cycle;
+  const pendingCycle = (n) => offered[n] !== -1 && offered[n] !== playingBank(n) ? banks[n][offered[n]].cycle : null;
+  function withdraw(n) {
+    send({ type: "offer", lane: n, bank: -1, cycleTicks: 0, now: false, release: false });
+    offered[n] = -1;
+  }
+  function soundingCycle(n) {
+    const at = adoptedAt[n];
+    return at === null ? playingCycle(n) : engine.locate(n, at).cycleIndex;
+  }
+  function prepareNext(n, current, force = false) {
+    if (force || pendingCycle(n) !== current + 1) render(n, current + 1);
+  }
+  function render(n, cycleIndex, now = false) {
+    withdraw(n);
+    const playingNow = playingBank(n);
+    const current = banks[n][playingNow];
+    if (cycleIndex === null) cycleIndex = current.cycle;
+    const bank = 1 - playingNow;
+    const frame = `${engine.cycleTicks(n)}/${engine.resetTicks()}`;
+    const release = playing && frame !== current.frame;
+    const handOn = playing && !release;
+    const carried = !handOn ? [] : now ? current.carried : current.table.carry;
+    const table = engine.cycleTable(n, gridTicks, cycleIndex, carried, handOn && now ? current.table : EMPTY);
+    const target = banks[n][bank];
+    for (const key of target.keys) send({ type: "remove", key });
+    target.keys = table.slots.map(({ slot, notes }) => {
+      const key = (n * 2 + bank) * bankSize + slot;
+      send({ type: "write", key, notes });
+      return key;
+    });
+    Object.assign(target, { cycle: cycleIndex, table, carried, frame });
+    offered[n] = bank;
+    send({ type: "offer", lane: n, bank, cycleTicks: engine.cycleTicks(n), now: now && playing, release });
+  }
+  function follow(n, cycleIndex) {
+    if (!playing) {
+      if (playingCycle(n) !== cycleIndex) render(n, cycleIndex);
+      return;
+    }
+    const held = soundingCycle(n);
+    prepareNext(n, Math.abs(cycleIndex - held) <= 1 ? Math.max(cycleIndex, held) : cycleIndex);
+  }
+  function changed(n) {
+    if (playing) prepareNext(n, soundingCycle(n), true);
+    else render(n, engine.locate(n, polledAt).cycleIndex);
+  }
+  return {
+    /** A fresh player (not playing any bank yet): every Lane from its first Cycle. */
+    start() {
+      for (let n = 0; n < lanes; n++) render(n, 0);
+    },
+    get playing() {
+      return playing;
+    },
+    transport(isPlaying) {
+      playing = isPlaying;
+      if (!playing) {
+        for (let n = 0; n < lanes; n++) withdraw(n);
+        return;
+      }
+      for (let n = 0; n < lanes; n++) {
+        adoptedAt[n] = null;
+        prepareNext(n, playingCycle(n));
+      }
+    },
+    /** The song position, polled a few times a second. */
+    poll(songTicks) {
+      polledAt = songTicks;
+      for (let n = 0; n < lanes; n++) follow(n, engine.locate(n, songTicks).cycleIndex);
+    },
+    /** The player took up a pending bank at a Cycle boundary: line up the Cycle after it. */
+    adopted(n, songTicks) {
+      if (!playing) return;
+      adoptedAt[n] = songTicks;
+      const sounding = engine.locate(n, songTicks).cycleIndex;
+      if (playingCycle(n) !== sounding) return render(n, sounding, true);
+      prepareNext(n, sounding);
+    },
+    /** The Lane's settings changed: heard from its next Cycle (at once while stopped). */
+    changed,
+    /** The Lane's settings changed and can't wait for the next Cycle: heard from the next note. */
+    changedNow(n) {
+      if (playing) render(n, null, true);
+      else changed(n);
+    },
+    /** The Cycle a Capture takes: the one sounding, or the one at the song position while stopped. */
+    captureCycle(n) {
+      return playing ? soundingCycle(n) : engine.locate(n, polledAt).cycleIndex;
+    },
+    /** The song position a change timed to the bar counts from: undefined while stopped (the change is immediate). */
+    changePosition() {
+      return playing ? polledAt : void 0;
+    }
+  };
 }
 
 // src/index.ts
@@ -492,6 +604,8 @@ function createEngine() {
       resetTicks = (config.resetBars ?? 0) * ticksPerBar;
     },
     cycleTicks,
+    /** The Reset period in ticks (0 = no Reset). */
+    resetTicks: () => resetTicks,
     locate,
     renderCycle,
     /** The Voices a Lane drives (after any pending Voice Layout change). */
