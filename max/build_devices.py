@@ -377,10 +377,6 @@ def build_hub():
     P.comment("PWM Bars", 495, 32, 55, tab=4)
 
     # Tab 5 (Voicing) headers & section labels
-    P.comment("Voice Assignment", 316, 14, 95, tab=5)
-    P.comment("Playback Mode", 432, 14, 85, tab=5)
-    P.comment("Chord (Poly only)", 530, 14, 105, tab=5)
-
     P.comment("V1", 318, 32, 18, tab=5)
     P.comment("V2", 342, 32, 18, tab=5)
     P.comment("V3", 366, 32, 18, tab=5)
