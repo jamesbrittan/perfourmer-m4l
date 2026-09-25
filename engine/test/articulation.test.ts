@@ -115,3 +115,34 @@ describe("Replacing the playing Cycle mid-way (a Gate change)", () => {
     expect(table(100, table(50)).carry).toEqual([{ slot: 0, voice: 1, pitch: 67, tie: true }]);
   });
 });
+
+describe("Very short gates", () => {
+  it("still end each note at least one grid slot after it starts", () => {
+    const engine = createEngine();
+    engine.configure({ lanes: [{ hits: 1, length: 1, rotate: 0, rate: "1/32Q", gate: 1 }] });
+    expect(engine.cycleTable(0, 2, 0).slots).toEqual([
+      { slot: 0, notes: [[1, 60, 100]] },
+      { slot: 1, notes: [[1, 60, 0]] },
+    ]);
+  });
+});
+
+describe("Carried note-offs and Resets", () => {
+  it("carries a note-off on again when a Reset cuts the Cycle short before it's due", () => {
+    const engine = createEngine();
+    // x...x...x... is 1440 ticks; a Reset every bar cuts every second Cycle to 480 ticks (240 slots)
+    engine.configure({ lanes: [{ hits: 3, length: 12, rotate: 0 }], resetBars: 1 });
+    const { carry } = engine.cycleTable(0, 2, 1, [{ slot: 300, voice: 1, pitch: 50, tie: false }]);
+    expect(carry).toContainEqual({ slot: 60, voice: 1, pitch: 50, tie: false });
+  });
+});
+
+describe("A hit exactly where a Reset falls", () => {
+  it("belongs to the new Reset period, not the Cycle the Reset cuts short", () => {
+    const engine = createEngine();
+    // 5 septuplet steps = 342.86 ticks; a Reset every bar leaves the 6th Cycle 3 steps (205.71 ticks) long,
+    // so the hit on step 3 of that Cycle would land exactly on the Reset
+    engine.configure({ lanes: [{ hits: 2, length: 5, rotate: 3, rate: "1/16S" }], resetBars: 1 });
+    expect(engine.renderCycle(0, 5).map((e) => Math.round(e.onset))).toEqual([0]);
+  });
+});

@@ -94,7 +94,7 @@ export function createEngine() {
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
     const patternOnsets = rotated.flatMap((hit, i) => (hit ? [i * step] : []));
-    const onsets = patternOnsets.filter((onset) => onset < end); // hits after a Reset cut are never reached
+    const onsets = patternOnsets.filter((onset) => onset < end - 1e-6); // hits from a Reset cut on are never reached
     // the gap after the last hit runs to the next Cycle's first hit
     const gaps = onsets.map((onset, i) => (i + 1 < onsets.length ? onsets[i + 1] : end + patternOnsets[0]) - onset);
     const tie = gateMode === "gap" && gate >= 100;
@@ -160,18 +160,28 @@ export function createEngine() {
     carried: Carry[] = [],
     replacing: CycleTable = { slots: [], carry: [] },
   ): CycleTable {
-    const slotOf = (tick: number) => Math.round(tick / gridTicks);
+    // The player reads slot floor(position / grid) on ticks one grid step apart, so from each Cycle's start it
+    // reaches slots 0, 1, 2, … in turn. When Cycles aren't a whole number of slots (septuplets), a Cycle can start
+    // up to a slot's width before its first tick, so its last slot isn't always reached: anything due there goes
+    // into the next Cycle.
+    const slotOf = (tick: number) => Math.floor(tick / gridTicks + 1e-9);
     const end = playedTicks(lane, cycleIndex);
+    const aligned = Number.isInteger(cycleTicks(lane) / gridTicks) && Number.isInteger(end / gridTicks);
+    const lastSlot = aligned ? end / gridTicks - 1 : Math.ceil(end / gridTicks) - 2;
+    const nextCycleSlot = (tick: number) => Math.max(0, slotOf(tick - end));
     type Off = { slot: number; voice: number; pitch: number; tie: boolean };
     const ons: Event[] = renderCycle(lane, cycleIndex);
-    const offs: Off[] = [...carried];
     const carry: Carry[] = [];
+    // a carried note-off due after this Cycle's end (a Reset cut it short) is carried on again
+    const offs: Off[] = carried.filter((off) => off.slot <= lastSlot);
+    for (const off of carried) if (off.slot > lastSlot) carry.push({ ...off, slot: nextCycleSlot(off.slot * gridTicks) });
     for (const e of ons) {
       const off = { voice: e.voice, pitch: e.pitch, tie: Boolean(e.tie) };
       const tick = e.onset + e.duration;
       // an off at (or within half a slot of) the Cycle's end belongs to the next Cycle, after its first note-on
-      if (tick >= end - gridTicks / 2) carry.push({ ...off, slot: Math.max(0, slotOf(tick - end)) });
-      else offs.push({ ...off, slot: slotOf(tick) });
+      const slot = Math.max(slotOf(tick), slotOf(e.onset) + 1); // never in its own note-on's slot
+      if (slot > lastSlot) carry.push({ ...off, slot: nextCycleSlot(tick) });
+      else offs.push({ ...off, slot });
     }
     const held = (off: Off) => (e: Event) =>
       off.tie && slotOf(e.onset) === off.slot && e.voice === off.voice && e.pitch === off.pitch;
@@ -182,19 +192,26 @@ export function createEngine() {
       return !continued;
     });
     const sent = new Set(sentOffs);
-    // where the new table ends the note of (voice, pitch) that is sounding at `slot`
-    const newEnd = (voice: number, pitch: number, slot: number) => {
-      const same = (x: { voice: number; pitch: number }) => x.voice === voice && x.pitch === pitch;
-      const started = ons.filter((e) => same(e) && slotOf(e.onset) < slot).pop();
-      if (started && skippedOns.has(started)) return Infinity; // held on from a tie
-      const after = started ? slotOf(started.onset) : -Infinity;
-      const ends = offs.filter((o) => same(o) && o.slot > after).map((o) => (sent.has(o) ? o.slot : Infinity));
-      if (started && carry.some(same)) ends.push(Infinity);
-      return ends.length ? Math.min(...ends) : -Infinity;
+    // A note the replaced table started ends at its old note-off unless the new table has the very same note
+    // (same start slot, Voice and pitch) and ends it later. Erring this way can end a note early during edits,
+    // never leave one hanging.
+    const oldOns = replacing.slots.flatMap(({ slot, notes }) =>
+      notes.filter(([, , velocity]) => velocity > 0).map(([voice, pitch]) => ({ slot, voice, pitch })),
+    );
+    const newEnd = (on: { slot: number; voice: number; pitch: number }) => {
+      const e = ons.find((x) => slotOf(x.onset) === on.slot && x.voice === on.voice && x.pitch === on.pitch);
+      if (!e || skippedOns.has(e)) return -Infinity;
+      const off = offs.find((o) => o.voice === e.voice && o.pitch === e.pitch && o.slot > on.slot);
+      if (off) return sent.has(off) ? off.slot : Infinity;
+      return carry.some((c) => c.voice === e.voice && c.pitch === e.pitch) ? Infinity : -Infinity;
     };
     for (const { slot, notes } of replacing.slots)
-      for (const [voice, pitch, velocity] of notes)
-        if (velocity === 0 && newEnd(voice, pitch, slot) < slot) sentOffs.push({ slot, voice, pitch, tie: false });
+      for (const [voice, pitch, velocity] of notes) {
+        if (velocity !== 0) continue;
+        const started = oldOns.filter((o) => o.voice === voice && o.pitch === pitch && o.slot < slot).pop();
+        const duplicate = sentOffs.some((o) => o.slot === slot && o.voice === voice && o.pitch === pitch);
+        if (!duplicate && !(started && newEnd(started) >= slot)) sentOffs.push({ slot, voice, pitch, tie: false });
+      }
     const slots = new Map<number, Slot["notes"]>();
     const add = (slot: number, note: [number, number, number]) => slots.set(slot, [...(slots.get(slot) ?? []), note]);
     const onsAt = (slot: number) => ons.filter((e) => !skippedOns.has(e) && slotOf(e.onset) === slot);
@@ -203,7 +220,8 @@ export function createEngine() {
     for (const e of ons) if (!skippedOns.has(e)) add(slotOf(e.onset), [e.voice, e.pitch, e.velocity]);
     for (const off of sentOffs.filter((off) => !retriggers(off))) add(off.slot, [off.voice, off.pitch, 0]);
     const same = (a: Carry) => (b: Carry) => a.voice === b.voice && a.pitch === b.pitch;
-    for (const old of replacing.carry) if (!carry.some(same(old))) carry.push({ ...old, tie: false });
+    const identical = (a: Carry) => (b: Carry) => same(a)(b) && a.slot === b.slot && a.tie === b.tie;
+    for (const old of replacing.carry) if (!carry.some(identical(old))) carry.push({ ...old, tie: false });
     return { slots: [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes })), carry };
   }
 
