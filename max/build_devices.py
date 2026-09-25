@@ -391,8 +391,8 @@ def build_hub():
     P.comment("Prob %", 310, 32, 36, tab=3)
     P.comment("Mutate", 352, 32, 36, tab=3)
     P.comment("Seed", 394, 32, 32, tab=3)
-    P.comment("Capture / Revert", 448, 32, 95, tab=3)
-    P.comment("Base", 550, 32, 40, tab=3)
+    P.comment("Capture / Revert / Freeze", 448, 32, 130, tab=3)
+    P.comment("Base", 580, 32, 40, tab=3)
 
     # Tab 4 (Timbre) headers
     P.comment("VCF Depth", 315, 32, 55, tab=4)
