@@ -291,7 +291,11 @@ function createEngine() {
   };
   let scale = C_MAJOR;
   let split = "1+1+1+1";
-  let splitChange = { from: "1+1+1+1", at: 0 };
+  let voiceLayout = SPLITS["1+1+1+1"];
+  let splitChange = {
+    from: SPLITS["1+1+1+1"],
+    at: 0
+  };
   let resetTicks = 0;
   const voiceDevices = /* @__PURE__ */ new Map();
   function cycleHits(lane, cycleIndex, evolve = true) {
@@ -347,7 +351,7 @@ function createEngine() {
         velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
         ...tie && !cut && { tie }
       };
-      return allocate(lane, degree, count, toPitch, before ? splitChange.from : split).map(({ voice, pitch }) => ({
+      return allocate(lane, degree, count, toPitch, before ? splitChange.from : voiceLayout).map(({ voice, pitch }) => ({
         ...note,
         pitch,
         voice
@@ -360,7 +364,7 @@ function createEngine() {
     return Math.floor(cycleIndex / perPeriod) * resetTicks + cycleIndex % perPeriod * cycleTicks(lane);
   }
   function allocate(lane, degree, count, toPitch, layout) {
-    const group = SPLITS[layout][lane] ?? [];
+    const group = layout[lane] ?? [];
     const { groupMode = "poly", chordShape = "triad" } = lanes[lane];
     if (group.length === 1 || group.length && groupMode !== "poly") {
       if (groupMode === "unison") return group.map((voice) => ({ voice, pitch: toPitch(degree) }));
@@ -379,7 +383,7 @@ function createEngine() {
     return chord.slice(0, group.length).map((pitch, i) => ({ voice: highestFirst[i], pitch }));
   }
   function laneVoices(lane) {
-    return SPLITS[split][lane] ?? [];
+    return voiceLayout[lane] ?? [];
   }
   function stepTicks(lane) {
     return RATE_TICKS[lanes[lane].rate ?? "1/16"];
@@ -473,7 +477,10 @@ function createEngine() {
       }
       scale = config.scale ?? C_MAJOR;
       split = config.split ?? "1+1+1+1";
-      splitChange = { from: config.previousSplit ?? split, at: config.splitAt ?? 0 };
+      const nextLayout = config.voiceLayout ?? SPLITS[split];
+      const prevLayout = config.previousVoiceLayout ?? (config.previousSplit ? SPLITS[config.previousSplit] : config.voiceLayout ? splitChange.from : nextLayout);
+      voiceLayout = nextLayout;
+      splitChange = { from: prevLayout, at: config.splitAt ?? 0 };
       resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
     },
     cycleTicks,

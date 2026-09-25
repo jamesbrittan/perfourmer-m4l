@@ -113,6 +113,8 @@ export type EngineConfig = {
   split?: Split;
   previousSplit?: Split;
   splitAt?: number;
+  voiceLayout?: readonly (readonly number[])[];
+  previousVoiceLayout?: readonly (readonly number[])[];
 };
 /** One player grid slot: the [voice, pitch, velocity] messages due there (velocity 0 = note-off). */
 export type Slot = { slot: number; notes: [number, number, number][] };
@@ -166,7 +168,11 @@ export function createEngine() {
   };
   let scale = C_MAJOR;
   let split: Split = "1+1+1+1";
-  let splitChange = { from: "1+1+1+1" as Split, at: 0 };
+  let voiceLayout: readonly (readonly number[])[] = SPLITS["1+1+1+1"];
+  let splitChange: { from: readonly (readonly number[])[]; at: number } = {
+    from: SPLITS["1+1+1+1"],
+    at: 0,
+  };
   let resetTicks = 0; // 0 = Lanes never realign
   const voiceDevices = new Map<number, number>(); // Voice device id -> Voice number
 
@@ -234,7 +240,7 @@ export function createEngine() {
         velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
         ...(tie && !cut && { tie }),
       };
-      return allocate(lane, degree, count, toPitch, before ? splitChange.from : split).map(({ voice, pitch }) => ({
+      return allocate(lane, degree, count, toPitch, before ? splitChange.from : voiceLayout).map(({ voice, pitch }) => ({
         ...note,
         pitch,
         voice,
@@ -260,9 +266,9 @@ export function createEngine() {
     degree: number,
     count: number,
     toPitch: (degree: number) => number,
-    layout: Split,
+    layout: readonly (readonly number[])[],
   ) {
-    const group: readonly number[] = SPLITS[layout][lane] ?? [];
+    const group: readonly number[] = layout[lane] ?? [];
     const { groupMode = "poly", chordShape = "triad" } = lanes[lane];
     if (group.length === 1 || (group.length && groupMode !== "poly")) {
       if (groupMode === "unison") return group.map((voice) => ({ voice, pitch: toPitch(degree) }));
@@ -282,7 +288,7 @@ export function createEngine() {
   }
 
   function laneVoices(lane: number): readonly number[] {
-    return SPLITS[split][lane] ?? [];
+    return voiceLayout[lane] ?? [];
   }
 
   function stepTicks(lane: number): number {
@@ -415,7 +421,10 @@ export function createEngine() {
       }
       scale = config.scale ?? C_MAJOR;
       split = config.split ?? "1+1+1+1";
-      splitChange = { from: config.previousSplit ?? split, at: config.splitAt ?? 0 };
+      const nextLayout = config.voiceLayout ?? SPLITS[split];
+      const prevLayout = config.previousVoiceLayout ?? (config.previousSplit ? SPLITS[config.previousSplit] : (config.voiceLayout ? splitChange.from : nextLayout));
+      voiceLayout = nextLayout;
+      splitChange = { from: prevLayout, at: config.splitAt ?? 0 };
       resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
     },
     cycleTicks,
