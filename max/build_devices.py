@@ -31,10 +31,9 @@ HELP = {
                "length."),
     "Transpose": ("Transpose", "Moves the Lane along the Scale by scale degrees. Takes effect from the next Cycle."),
     "Octave": ("Octave", "Moves the Lane up or down by octaves. Takes effect from the next Cycle."),
-    "Gate Mode": ("Gate Mode", "Step: each note lasts Gate % of one step. Gap: Gate % of the gap to the next hit, so "
-                  "sparse patterns get long notes; Gap at 100% ties the notes legato."),
-    "Gate": ("Gate %", "Note length as a percentage of a step or of the gap to the next hit (see Gate Mode). Heard "
-             "from the next note."),
+    "Gate": ("Gate %", "Note length, from short to tied. Up to 50%: that percentage of one step. From 50% to 100%: "
+             "stretches from half a step to the whole gap to the next hit, so sparse patterns get long notes. 100%: "
+             "each note ties into the next (legato; glides if the Perfourmer's Glide is up). Heard from the next note."),
     "Velocity": ("Velocity", "Velocity of every note (1–127). Heard from the next note."),
     "Accent": ("Accent", "Velocity added to the first hit of each Cycle; 0 = no accent. Heard from the next note."),
     "Probability": ("Probability", "Chance (%) that each hit sounds, decided per Cycle from the Seed, so the same bars "
@@ -185,8 +184,7 @@ LANES = 4
 LANE_DEFAULTS = [(5, 8, 0), (3, 8, 0), (2, 5, 0), (7, 12, 0)]  # must match params in pf4-hub.js
 PITCH_DEFAULTS = [([0, 4, 2, 5], 0), ([0, 2, 4], -1), ([0, -3], -2), ([4, 6, 7, 9, 11], 0)]  # (Pitch Cycle, octave)
 PITCH_STEPS = 8
-GATE_MODES = ["Step", "Gap"]  # = GATE_MODES in pf4-hub.js
-ARTICULATION_DEFAULTS = (0, 50, 100, 0)  # Gate Mode, Gate %, Velocity, Accent; must match pf4-hub.js
+ARTICULATION_DEFAULTS = (50, 100, 0)  # Gate %, Velocity, Accent; must match pf4-hub.js
 PLAYER_DICT = "pf4.player"  # each Lane's playing bank, read by the adapter (pf4-hub.js)
 RATES = ["1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16Q", "1/16T", "1/16S", "1/32", "1/32Q"]  # = engine RATES
 DEFAULT_RATE = RATES.index("1/16")
@@ -283,22 +281,20 @@ def build_hub():
                  for i in range(PITCH_STEPS)]
         trans = P.param("live.numbox", f"L{n + 1} Transpose", 850, py, -7, 7, 0, w=30, h=18, short="Trans")
         octv = P.param("live.numbox", f"L{n + 1} Octave", 884, py, -3, 3, octave, w=30, h=18, short="Oct")
-        # Articulation: Gate Mode, Gate %, Velocity, Accent — heard from the next note
-        mode_d, gate_d, vel_d, acc_d = ARTICULATION_DEFAULTS
+        # Articulation: Gate %, Velocity, Accent — heard from the next note
+        gate_d, vel_d, acc_d = ARTICULATION_DEFAULTS
         if n == 0:
             for label, ax in (("Len", 602), ("Pitch Cycle (scale degrees)", 636), ("Trans", 850), ("Oct", 884)):
                 P.comment(label, ax, 4, 140 if ax == 636 else 34)
-            for label, ax in (("Gate", 924), ("Gate %", 972), ("Vel", 1008), ("Accent", 1044)):
+            for label, ax in (("Gate %", 972), ("Vel", 1008), ("Accent", 1044)):
                 P.comment(label, ax, 4, 34)
-        gmode = P.param("live.tab", f"L{n + 1} Gate Mode", 924, py, 0, 1, mode_d, w=44, h=18, short="Gate",
-                        enum=GATE_MODES)
         gate = P.param("live.numbox", f"L{n + 1} Gate", 972, py, 1, 100, gate_d, w=32, h=18, short="Gate %")
         vel = P.param("live.numbox", f"L{n + 1} Velocity", 1008, py, 1, 127, vel_d, w=32, h=18, short="Vel")
         acc = P.param("live.numbox", f"L{n + 1} Accent", 1044, py, 0, 127, acc_d, w=32, h=18, short="Accent")
         lx = 200 + 300 * n  # this Lane's logic column
-        artic = P.obj(f"pak {mode_d} {gate_d} {vel_d} {acc_d}", lx, Y + 850, ins=4)
+        artic = P.obj(f"pak {gate_d} {vel_d} {acc_d}", lx, Y + 850, ins=3)
         to_artic = P.obj(f"prepend articulate {n}", lx, Y + 880)
-        for i, box in enumerate((gmode, gate, vel, acc)):
+        for i, box in enumerate((gate, vel, acc)):
             P.c(box, artic, 0, i)
         P.c(artic, to_artic); P.c(to_artic, adapter)
         py_l = Y + 700  # this Lane's pitch logic

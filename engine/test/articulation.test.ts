@@ -7,10 +7,10 @@ function cycle(lane: Partial<LaneParams>, cycleIndex = 0, resetBars = 0) {
   return engine.renderCycle(0, cycleIndex);
 }
 
-describe("Step gate", () => {
-  it("lasts a percentage of one step, whatever the gap to the next hit", () => {
-    expect(cycle({ gateMode: "step", gate: 25 }).map((e) => e.duration)).toEqual([30, 30, 30]);
-    expect(cycle({ gateMode: "step", gate: 100, rate: "1/8" }).map((e) => e.duration)).toEqual([240, 240, 240]);
+describe("Gate, up to 50%", () => {
+  it("lasts that percentage of one step, whatever the gap to the next hit", () => {
+    expect(cycle({ gate: 25 }).map((e) => e.duration)).toEqual([30, 30, 30]);
+    expect(cycle({ gate: 50, rate: "1/8" }).map((e) => e.duration)).toEqual([120, 120, 120]);
   });
 });
 
@@ -26,24 +26,24 @@ describe("Velocity and accent", () => {
   });
 });
 
-describe("Gap gate", () => {
-  it("lasts a percentage of the gap to the next hit, so a sparse pattern gets mixed note lengths", () => {
+describe("Gate, from 50% to 100%", () => {
+  it("stretches from half a step towards the whole gap to the next hit, so a sparse pattern gets mixed lengths", () => {
     // x..x..x. : gaps of 3, 3 and 2 steps (the last one wraps round to the next Cycle's first hit)
-    expect(cycle({ gateMode: "gap", gate: 50 }).map((e) => e.duration)).toEqual([180, 180, 120]);
+    expect(cycle({ gate: 75 }).map((e) => e.duration)).toEqual([210, 210, 150]);
     // .x..x..x : the last gap runs to step 1 of the next Cycle
-    expect(cycle({ gateMode: "gap", gate: 50, rotate: 1 }).map((e) => e.duration)).toEqual([180, 180, 120]);
+    expect(cycle({ gate: 75, rotate: 1 }).map((e) => e.duration)).toEqual([210, 210, 150]);
   });
 
   it("at 100% ends each note exactly where the next begins, and marks it as tied", () => {
-    const events = cycle({ gateMode: "gap", gate: 100 });
+    const events = cycle({ gate: 100 });
     expect(events.map((e) => e.onset + e.duration)).toEqual([360, 720, 960]);
     expect(events.every((e) => e.tie)).toBe(true);
-    expect(cycle({ gateMode: "gap", gate: 99 }).some((e) => e.tie)).toBe(false);
+    expect(cycle({ gate: 99 }).some((e) => e.tie)).toBe(false);
   });
 
   it("measures the last gap to where a Reset cuts the Cycle short, and drops hits the Reset cuts off", () => {
     // x...x...x... is 1440 ticks; a Reset every bar (1920) cuts every second Cycle to 480 ticks
-    const cut = cycle({ hits: 3, length: 12, gateMode: "gap", gate: 100 }, 1, 1);
+    const cut = cycle({ hits: 3, length: 12, gate: 100 }, 1, 1);
     expect(cut.map((e) => [e.onset, e.duration])).toEqual([[0, 480]]);
   });
 });
@@ -51,7 +51,7 @@ describe("Gap gate", () => {
 describe("Player table with ties", () => {
   const table = (lane: Partial<LaneParams>, cycleIndex = 0, carried: Parameters<ReturnType<typeof createEngine>["cycleTable"]>[3] = []) => {
     const engine = createEngine();
-    engine.configure({ lanes: [{ hits: 3, length: 8, rotate: 0, gateMode: "gap", gate: 100, ...lane }] });
+    engine.configure({ lanes: [{ hits: 3, length: 8, rotate: 0, gate: 100, ...lane }] });
     return engine.cycleTable(0, 2, cycleIndex, carried);
   };
   const at = (slots: { slot: number; notes: number[][] }[], slot: number) => slots.find((s) => s.slot === slot)?.notes;
@@ -88,7 +88,7 @@ describe("Player table with ties", () => {
 describe("Replacing the playing Cycle mid-way (a Gate change)", () => {
   const table = (gate: number, replacing?: CycleTable) => {
     const engine = createEngine();
-    engine.configure({ lanes: [{ hits: 3, length: 8, rotate: 0, gateMode: "gap", gate, pitchCycle: [0, 2, 4] }] });
+    engine.configure({ lanes: [{ hits: 3, length: 8, rotate: 0, gate, pitchCycle: [0, 2, 4] }] });
     return engine.cycleTable(0, 2, 0, [], replacing);
   };
   const build = (gate: number, replacing?: number) =>
@@ -98,12 +98,12 @@ describe("Replacing the playing Cycle mid-way (a Gate change)", () => {
 
   it("keeps the old note-offs of a shortened gate, so a note already sounding still ends", () => {
     const shorter = build(50, 100);
-    expect(offs(shorter)).toEqual([[90, 60], [180, 60], [270, 64], [360, 64], [420, 67]]);
+    expect(offs(shorter)).toEqual([[30, 60], [180, 60], [210, 64], [360, 64], [390, 67]]);
   });
 
   it("keeps old note-offs when a legato gate is shortened", () => {
     const shorter = build(80, 100);
-    expect(offs(shorter)).toEqual([[144, 60], [180, 60], [324, 64], [360, 64], [456, 67]]);
+    expect(offs(shorter)).toEqual([[120, 60], [180, 60], [300, 64], [360, 64], [444, 67]]);
   });
 
   it("doesn't cut a lengthened note at its old, earlier end", () => {

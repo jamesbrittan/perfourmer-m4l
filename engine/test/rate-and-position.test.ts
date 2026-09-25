@@ -58,7 +58,7 @@ describe("Player grid for off-grid rates", () => {
     engine.configure({ lanes: [{ hits: 1, length: 1, rotate: 0, rate: "1/16S", gate: 100 }] });
     const { slots, carry } = engine.cycleTable(0, 2, 0);
     expect(Math.max(...slots.map((s) => s.slot))).toBeLessThanOrEqual(33);
-    expect(carry).toEqual([{ slot: 0, voice: 1, pitch: 60, tie: false }]);
+    expect(carry).toEqual([{ slot: 0, voice: 1, pitch: 60, tie: true }]); // 100% = tied into the next hit
   });
 });
 

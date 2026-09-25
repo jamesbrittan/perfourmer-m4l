@@ -19,9 +19,9 @@ export type Rate = keyof typeof RATE_TICKS;
 /** Rate names in menu order (slowest first); the Hub's Rate control indexes into this. */
 export const RATES = Object.keys(RATE_TICKS) as Rate[];
 /** pitchCycle: scale degrees, one per hit (0 = the Scale's root nearest middle C), shifted by transpose
- * degrees and octave octaves. gate: % of one step ("step") or of the gap to the next hit ("gap"); at 100% of the
- * gap each note ties into the next. accent: velocity added to the first hit of each Cycle (0 = none). */
-export type GateMode = "step" | "gap";
+ * degrees and octave octaves. gate runs from short to tied: up to 50% it is that percentage of one step; from 50%
+ * to 100% the note stretches from half a step to the whole gap to the next hit, and at 100% it ties into the next.
+ * accent: velocity added to the first hit of each Cycle (0 = none). */
 export type LaneParams = {
   hits: number;
   length: number;
@@ -30,7 +30,6 @@ export type LaneParams = {
   pitchCycle?: number[];
   transpose?: number;
   octave?: number;
-  gateMode?: GateMode;
   gate?: number;
   velocity?: number;
   accent?: number;
@@ -87,7 +86,7 @@ export function createEngine() {
 
   function renderCycle(lane: number, cycleIndex: number): Event[] {
     const { hits, length, rotate, pitchCycle = [0], transpose = 0, octave = 0 } = lanes[lane];
-    const { gateMode = "step", gate = 50, velocity = 100, accent = 0 } = lanes[lane];
+    const { gate = 50, velocity = 100, accent = 0 } = lanes[lane];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
     const rotated = pattern.map((_, step) => pattern[(step - shift + length) % length]);
@@ -97,11 +96,13 @@ export function createEngine() {
     const onsets = patternOnsets.filter((onset) => onset < end - 1e-6); // hits from a Reset cut on are never reached
     // the gap after the last hit runs to the next Cycle's first hit
     const gaps = onsets.map((onset, i) => (i + 1 < onsets.length ? onsets[i + 1] : end + patternOnsets[0]) - onset);
-    const tie = gateMode === "gap" && gate >= 100;
+    const tie = gate >= 100;
+    const noteLength = (gap: number) =>
+      gate <= 50 ? (step * gate) / 100 : step / 2 + ((gap - step / 2) * (gate - 50)) / 50; // short … half a step … tied
     const hitsBefore = cyclesSinceReset(lane, cycleIndex) * patternOnsets.length; // the Pitch Cycle realigns at each Reset
     const notes = onsets.map((onset, hit) => ({
       onset,
-      duration: ((gateMode === "gap" ? gaps[hit] : step) * gate) / 100,
+      duration: noteLength(gaps[hit]),
       pitch: clampToMidi(degreeToNote(pitchCycle[(hitsBefore + hit) % pitchCycle.length] + transpose, scale) + 12 * octave),
       velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
       ...(tie && { tie }),

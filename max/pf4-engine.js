@@ -70,7 +70,7 @@ function createEngine() {
   const voiceDevices = /* @__PURE__ */ new Map();
   function renderCycle(lane, cycleIndex) {
     const { hits, length, rotate, pitchCycle = [0], transpose = 0, octave = 0 } = lanes[lane];
-    const { gateMode = "step", gate = 50, velocity = 100, accent = 0 } = lanes[lane];
+    const { gate = 50, velocity = 100, accent = 0 } = lanes[lane];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
     const rotated = pattern.map((_, step2) => pattern[(step2 - shift + length) % length]);
@@ -79,11 +79,12 @@ function createEngine() {
     const patternOnsets = rotated.flatMap((hit, i) => hit ? [i * step] : []);
     const onsets = patternOnsets.filter((onset) => onset < end - 1e-6);
     const gaps = onsets.map((onset, i) => (i + 1 < onsets.length ? onsets[i + 1] : end + patternOnsets[0]) - onset);
-    const tie = gateMode === "gap" && gate >= 100;
+    const tie = gate >= 100;
+    const noteLength = (gap) => gate <= 50 ? step * gate / 100 : step / 2 + (gap - step / 2) * (gate - 50) / 50;
     const hitsBefore = cyclesSinceReset(lane, cycleIndex) * patternOnsets.length;
     const notes = onsets.map((onset, hit) => ({
       onset,
-      duration: (gateMode === "gap" ? gaps[hit] : step) * gate / 100,
+      duration: noteLength(gaps[hit]),
       pitch: clampToMidi(degreeToNote(pitchCycle[(hitsBefore + hit) % pitchCycle.length] + transpose, scale) + 12 * octave),
       velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
       ...tie && { tie }

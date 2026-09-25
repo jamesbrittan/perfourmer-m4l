@@ -27,14 +27,13 @@ const NEVER = 1e12; // "no Reset" as a period the player's modulo can use
 
 const engine = createEngine();
 // defaults must match LANE_DEFAULTS, PITCH_DEFAULTS and ARTICULATION_DEFAULTS in build_devices.py
-const articulation = { gateMode: "step", gate: 50, velocity: 100, accent: 0 };
+const articulation = { gate: 50, velocity: 100, accent: 0 };
 const params = [
   { hits: 5, length: 8, rotate: 0, rate: "1/16", pitchCycle: [0, 4, 2, 5], transpose: 0, octave: 0, ...articulation },
   { hits: 3, length: 8, rotate: 0, rate: "1/16", pitchCycle: [0, 2, 4], transpose: 0, octave: -1, ...articulation },
   { hits: 2, length: 5, rotate: 0, rate: "1/16", pitchCycle: [0, -3], transpose: 0, octave: -2, ...articulation },
   { hits: 7, length: 12, rotate: 0, rate: "1/16", pitchCycle: [4, 6, 7, 9, 11], transpose: 0, octave: 0, ...articulation },
 ];
-const GATE_MODES = ["step", "gap"]; // the Gate Mode control's choices
 const song = { resetBars: 0, ticksPerBar: 1920, scale: { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] } };
 const writtenKeys = params.map(() => [[], []]);
 const bankCycle = params.map(() => [0, 0]); // the Cycle each bank holds
@@ -72,9 +71,9 @@ function pitch(n, length, ...degrees) {
   refresh(n);
 }
 
-// Gate Mode (0 step, 1 gap), Gate %, Velocity, Accent: heard from the next note, not the next Cycle
-function articulate(n, modeIndex, gate, velocity, accent) {
-  Object.assign(params[n], { gateMode: GATE_MODES[modeIndex], gate, velocity, accent });
+// Gate % (short … tied), Velocity, Accent: heard from the next note, not the next Cycle
+function articulate(n, gate, velocity, accent) {
+  Object.assign(params[n], { gate, velocity, accent });
   engine.configure({ lanes: params, ...song });
   if (!playing) return refresh(n);
   render(n, null, true);
