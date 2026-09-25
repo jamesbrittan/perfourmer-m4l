@@ -65,6 +65,19 @@ describe("The Captured Base", () => {
     expect(notes(reloaded, 0)).toEqual(notes(engine, 0));
   });
 
+  it("waits for its controls when a set loads, whatever order they arrive in", () => {
+    const engine = setup();
+    engine.capture(0, 5);
+    engine.configure({ lanes: [{ ...LANE, mutation: 0 }] });
+    const reloaded = createEngine();
+    reloaded.configure({ lanes: [{ hits: 3, length: 8, rotate: 0 }] }); // the device's defaults
+    reloaded.loadBases(engine.saveBases());
+    reloaded.configure({ lanes: [{ hits: 3, length: 8, rotate: 0 }] });
+    reloaded.configure({ lanes: [{ ...LANE, mutation: 0, length: 16 }] }); // controls restored one at a time
+    reloaded.configure({ lanes: [{ ...LANE, mutation: 0 }] });
+    expect(notes(reloaded, 0)).toEqual(notes(engine, 0));
+  });
+
   it("gives way when Hits, Length, Rotate or the Pitch Cycle change, but not for other settings", () => {
     const engine = setup();
     const heard = notes(engine, 6);

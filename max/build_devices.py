@@ -249,7 +249,9 @@ def build_hub():
     P.c(adapter, scale_readout, 6)
     player_state = P.obj(f"dict {PLAYER_DICT}", 1500, Y, ins=2, outs=4)
     # Captured Bases: a stored-only blob parameter, so they're saved with the set and with presets
-    stored = P.obj("pattr pf4_bases", 1500, Y + 60, ins=2, outs=3, varname="pf4_bases", parameter_enable=1,
+    # (a pattr's Parameter Mode is an object attribute: Max ignores parameter_enable on the box itself)
+    stored = P.obj("pattr pf4_bases", 1500, Y + 60, ins=2, outs=3, varname="pf4_bases",
+                   saved_object_attributes={"parameter_enable": 1},
                    saved_attribute_attributes={"valueof": {
                        "parameter_longname": "Captured Bases", "parameter_shortname": "Bases",
                        "parameter_type": 3, "parameter_invisible": 1}})

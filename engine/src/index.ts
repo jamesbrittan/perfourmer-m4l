@@ -96,7 +96,13 @@ const signature = ({ hits, length, rotate, pitchCycle = [0] }: LaneParams) => [h
 
 export function createEngine() {
   let lanes: LaneParams[] = [];
-  const captures = new Map<number, { signature: number[]; stack: Captured[] }>(); // Lane -> Bases, newest last
+  // Lane -> Bases, newest last. Bases loaded with a set wait (inactive) until the Lane's controls match the ones
+  // they were captured with, since a set's controls are restored one by one and in no particular order.
+  const captures = new Map<number, { signature: number[]; stack: Captured[]; waiting?: boolean }>();
+  const active = (lane: number) => {
+    const entry = captures.get(lane);
+    return entry && !entry.waiting ? entry : undefined;
+  };
   let scale = C_MAJOR;
   let resetTicks = 0; // 0 = Lanes never realign
   const voiceDevices = new Map<number, number>(); // Voice device id -> Voice number
@@ -111,7 +117,7 @@ export function createEngine() {
   function cycleHits(lane: number, cycleIndex: number, evolve = true): { onset: number; degree: number }[] {
     const { hits, length, rotate, pitchCycle = [0], seed = 0 } = lanes[lane];
     const { mutation, probability } = evolve ? { mutation: 0, probability: 100, ...lanes[lane] } : { mutation: 0, probability: 100 };
-    const stack = captures.get(lane)?.stack;
+    const stack = active(lane)?.stack;
     const captured = stack?.[stack.length - 1];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
@@ -283,8 +289,11 @@ export function createEngine() {
   return {
     configure(config: EngineConfig) {
       lanes = config.lanes;
-      for (const [lane, { signature: taken }] of captures)
-        if (!lanes[lane] || signature(lanes[lane]).join() !== taken.join()) captures.delete(lane);
+      for (const [lane, entry] of captures) {
+        const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
+        if (matches) entry.waiting = false;
+        else if (!entry.waiting) captures.delete(lane);
+      }
       scale = config.scale ?? C_MAJOR;
       resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
     },
@@ -303,13 +312,13 @@ export function createEngine() {
       const last = heard[heard.length - 1]?.degree ?? (lanes[lane].pitchCycle ?? [0])[0];
       let held = last; // rests before the first hit carry the last hit's degree round
       const degrees = steps.map((_, i) => (held = degreeAt.get(i) ?? held));
-      const entry = captures.get(lane) ?? { signature: signature(lanes[lane]), stack: [] };
+      const entry = active(lane) ?? { signature: signature(lanes[lane]), stack: [] };
       entry.stack.push({ steps, degrees });
       captures.set(lane, entry);
     },
     /** Go back to the Base from before the last Capture. */
     revert(lane: number) {
-      const entry = captures.get(lane);
+      const entry = active(lane);
       entry?.stack.pop();
       if (entry && !entry.stack.length) captures.delete(lane);
     },
@@ -340,8 +349,10 @@ export function createEngine() {
           stack.push({ steps: data.slice(i, i + length).map(Boolean), degrees: data.slice(i + length, i + 2 * length) });
           i += 2 * length;
         }
-        captures.set(lane, { signature: taken, stack });
+        captures.set(lane, { signature: taken, stack, waiting: true });
       }
+      for (const [lane, entry] of captures)
+        if (lanes[lane] && signature(lanes[lane]).join() === entry.signature.join()) entry.waiting = false;
     },
     voiceJoined(deviceId: number, voice: number) {
       voiceDevices.set(deviceId, voice);

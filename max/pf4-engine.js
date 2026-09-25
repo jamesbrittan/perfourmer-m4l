@@ -239,13 +239,17 @@ var signature = ({ hits, length, rotate, pitchCycle = [0] }) => [hits, length, r
 function createEngine() {
   let lanes = [];
   const captures = /* @__PURE__ */ new Map();
+  const active = (lane) => {
+    const entry = captures.get(lane);
+    return entry && !entry.waiting ? entry : void 0;
+  };
   let scale = C_MAJOR;
   let resetTicks = 0;
   const voiceDevices = /* @__PURE__ */ new Map();
   function cycleHits(lane, cycleIndex, evolve = true) {
     const { hits, length, rotate, pitchCycle = [0], seed = 0 } = lanes[lane];
     const { mutation, probability } = evolve ? { mutation: 0, probability: 100, ...lanes[lane] } : { mutation: 0, probability: 100 };
-    const stack = captures.get(lane)?.stack;
+    const stack = active(lane)?.stack;
     const captured = stack?.[stack.length - 1];
     const pattern = bjorklund(hits, length);
     const shift = rotate % length;
@@ -374,8 +378,11 @@ function createEngine() {
   return {
     configure(config) {
       lanes = config.lanes;
-      for (const [lane, { signature: taken }] of captures)
-        if (!lanes[lane] || signature(lanes[lane]).join() !== taken.join()) captures.delete(lane);
+      for (const [lane, entry] of captures) {
+        const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
+        if (matches) entry.waiting = false;
+        else if (!entry.waiting) captures.delete(lane);
+      }
       scale = config.scale ?? C_MAJOR;
       resetTicks = (config.resetBars ?? 0) * (config.ticksPerBar ?? 1920);
     },
@@ -394,13 +401,13 @@ function createEngine() {
       const last = heard[heard.length - 1]?.degree ?? (lanes[lane].pitchCycle ?? [0])[0];
       let held = last;
       const degrees = steps.map((_, i) => held = degreeAt.get(i) ?? held);
-      const entry = captures.get(lane) ?? { signature: signature(lanes[lane]), stack: [] };
+      const entry = active(lane) ?? { signature: signature(lanes[lane]), stack: [] };
       entry.stack.push({ steps, degrees });
       captures.set(lane, entry);
     },
     /** Go back to the Base from before the last Capture. */
     revert(lane) {
-      const entry = captures.get(lane);
+      const entry = active(lane);
       entry?.stack.pop();
       if (entry && !entry.stack.length) captures.delete(lane);
     },
@@ -431,8 +438,10 @@ function createEngine() {
           stack.push({ steps: data.slice(i, i + length).map(Boolean), degrees: data.slice(i + length, i + 2 * length) });
           i += 2 * length;
         }
-        captures.set(lane, { signature: taken, stack });
+        captures.set(lane, { signature: taken, stack, waiting: true });
       }
+      for (const [lane, entry] of captures)
+        if (lanes[lane] && signature(lanes[lane]).join() === entry.signature.join()) entry.waiting = false;
     },
     voiceJoined(deviceId, voice) {
       voiceDevices.set(deviceId, voice);
