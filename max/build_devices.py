@@ -73,6 +73,10 @@ HELP = {
     "Capture": ("Capture", "Makes the Cycle playing now the Lane's Base, so Mutation 0 repeats it and Mutation "
                 "departs from it. Revert undoes it."),
     "Revert": ("Revert", "Goes back to the Base from before the last Capture."),
+    "Freeze": ("Freeze", "Holds the Cycle playing now: from the next Cycle the Lane repeats it exactly, without "
+               "changing Mutation. Turn it off to evolve again from where the song is. Freeze is for performing; "
+               "Capture keeps a pattern as the Lane's Base. Capture while frozen makes the held Cycle the Base and "
+               "keeps holding it. Saved with the set, and records as automation."),
     "AT Depth": ("Aftertouch LFO depth", "How far the Lane's aftertouch LFO sweeps (the Perfourmer's VCF cutoff, with "
                  "Edit 3 on). 0 = no aftertouch sent."),
     "AT Rate": ("Aftertouch LFO rate", "Length of one aftertouch sweep, in bars of four beats. Follows song position, "
@@ -311,6 +315,14 @@ def build_hub():
                        "parameter_type": 3, "parameter_invisible": 1}})
     to_bases = P.obj("prepend bases", 1500, Y + 90)
     P.c(adapter, stored, OUT["bases"]); P.c(stored, to_bases); P.c(to_bases, adapter)
+    # Frozen Cycles pattr (stored only): which Cycle each Lane's Freeze holds
+    stored_frozen = P.obj("pattr pf4_frozen", 1650, Y + 60, ins=2, outs=3, varname="pf4_frozen",
+                          saved_object_attributes={"parameter_enable": 1},
+                          saved_attribute_attributes={"valueof": {
+                              "parameter_longname": "Frozen Cycles", "parameter_shortname": "Frozen",
+                              "parameter_type": 3, "parameter_invisible": 1}})
+    to_frozen = P.obj("prepend frozen", 1650, Y + 90)
+    P.c(adapter, stored_frozen, OUT["frozen"]); P.c(stored_frozen, to_frozen); P.c(to_frozen, adapter)
 
     # Pattern and position routing
     patterns = P.obj(lanes_route(), 1300, Y + 120, ins=2, outs=LANES + 1)
@@ -491,11 +503,11 @@ def build_hub():
             P.c(box, evo, 0, i)
         P.c(evo, to_evo); P.c(to_evo, adapter)
 
-        capture_btn = P.add("live.text", 448, ty, w=48, h=18, ins=1, outs=2, text="Capture", texton="Capture", mode=0,
+        capture_btn = P.add("live.text", 448, ty, w=44, h=18, ins=1, outs=2, text="Capture", texton="Capture", mode=0,
                             parameter_enable=1, tab=3, saved_attribute_attributes={"valueof": {
                                 "parameter_longname": f"L{n + 1} Capture", "parameter_shortname": "Capture",
                                 "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
-        revert_btn = P.add("live.text", 500, ty, w=46, h=18, ins=1, outs=2, text="Revert", texton="Revert", mode=0,
+        revert_btn = P.add("live.text", 494, ty, w=40, h=18, ins=1, outs=2, text="Revert", texton="Revert", mode=0,
                            parameter_enable=1, tab=3, saved_attribute_attributes={"valueof": {
                                "parameter_longname": f"L{n + 1} Revert", "parameter_shortname": "Revert",
                                "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
@@ -504,7 +516,13 @@ def build_hub():
         P.c(capture_btn, cap_action); P.c(cap_action, adapter)
         P.c(revert_btn, rev_action); P.c(rev_action, adapter)
 
-        base_readout = P.add("comment", 550, ty + 2, w=92, h=14, text="Euclidean", fontsize=9, ins=1, outs=0, tab=3)
+        # Freeze: a toggle (so it records as automation), outputting 1/0
+        freeze_btn = P.param("live.text", f"L{n + 1} Freeze", 536, ty, 0, 1, 0, w=40, h=18, short="Freeze", tab=3,
+                             text="Freeze", texton="Frozen", mode=1)
+        to_freeze = P.obj(f"prepend freeze {n}", lx + 330, Y + 880)
+        P.c(freeze_btn, to_freeze); P.c(to_freeze, adapter)
+
+        base_readout = P.add("comment", 580, ty + 2, w=66, h=14, text="Euclidean", fontsize=9, ins=1, outs=0, tab=3)
         P.c(readouts, base_readout, LANES + n)
 
         # --- Tab 4: Timbre LFOs (VCF cutoff & PWM)

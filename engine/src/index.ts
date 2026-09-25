@@ -77,7 +77,9 @@ export const RATES = Object.keys(RATE_TICKS) as Rate[];
  * to 100% the note stretches from half a step to the whole gap to the next hit, and at 100% it ties into the next.
  * accent: velocity added to the first hit of each Cycle (0 = none).
  * probability: % chance each hit sounds; mutation: 0 (the Base every Cycle) to 127 (a new pattern every Cycle);
- * seed: picks the path Mutation and probability take. */
+ * seed: picks the path Mutation and probability take.
+ * freeze: hold one Cycle, repeating it exactly (its Mutation and probability draws included) whatever Cycle is due;
+ * "base" holds the Base without Mutation or probability (a Capture while frozen makes the frozen Cycle the Base). */
 export type LaneParams = {
   hits: number;
   length: number;
@@ -94,6 +96,7 @@ export type LaneParams = {
   gate?: number;
   velocity?: number;
   accent?: number;
+  freeze?: number | "base";
 };
 /** Live's global scale: root 0–11 (C = 0) and the semitone intervals of its notes. */
 export type Scale = { root: number; intervals: number[] };
@@ -214,7 +217,10 @@ export function createEngine() {
    * fixed number per step, so a Cycle is reproducible from song position whatever the other settings.
    */
   function cycleHits(lane: number, cycleIndex: number, evolve = true): { onset: number; degree: number; count: number }[] {
-    const { hits, length, rotate, pitchCycle = [0], seed = 0 } = lanes[lane];
+    const { hits, length, rotate, pitchCycle = [0], seed = 0, freeze } = lanes[lane];
+    if (freeze === "base") evolve = false;
+    const end = playedTicks(lane, cycleIndex);
+    if (typeof freeze === "number") cycleIndex = freeze; // a frozen Lane draws, and counts hits, as in its held Cycle
     const { mutation, probability } = evolve ? { mutation: 0, probability: 100, ...lanes[lane] } : { mutation: 0, probability: 100 };
     const stack = active(lane)?.stack;
     const captured = stack?.[stack.length - 1];
@@ -230,7 +236,6 @@ export function createEngine() {
     let hitIndex = cyclesSinceReset(lane, cycleIndex) * baseHits; // the Pitch Cycle realigns at each Reset
     let count = cyclesSinceReset(lane, cycleIndex) * baseHits; // hits since the Reset, for round-robin
     const step = stepTicks(lane);
-    const end = playedTicks(lane, cycleIndex);
     const sounding: { onset: number; degree: number; count: number }[] = [];
     base.forEach((isHit, i) => {
       const [stepDraw, hitDraw, pitchDraw, degreeDraw, soundDraw] = [chance(), chance(), chance(), chance(), chance()];
@@ -568,6 +573,8 @@ export function createEngine() {
       const entry = active(lane) ?? { signature: signature(lanes[lane]), stack: [] };
       entry.stack.push({ steps, degrees });
       captures.set(lane, entry);
+      // a frozen Lane holds on to what it was playing: the new Base, unmutated
+      if (lanes[lane].freeze !== undefined) lanes[lane] = { ...lanes[lane], freeze: "base" };
       basesChanged++;
     },
     /** Go back to the Base from before the last Capture. */
