@@ -24,24 +24,20 @@ export const DEFAULT_LANES: LaneParams[] = [
 /** What the Hub's controls do, as the Hub passes them on. */
 export type Controls = ReturnType<typeof hub>;
 
-function hub(engine: ReturnType<typeof createEngine>, scheduler: ReturnType<typeof createScheduler>, state: HubState) {
-  const configure = () => engine.configure({ lanes: state.params, scale: state.scale, resetBars: state.resetBars });
+function hub(engine: ReturnType<typeof createEngine>, scheduler: ReturnType<typeof createScheduler>) {
   const controls = {
     /** Hits, Length, Rotate, Rate, the Pitch Cycle, Mutation …: from the Lane's next Cycle. */
     lane(n: number, change: Partial<LaneParams>) {
-      Object.assign(state.params[n], change);
-      configure();
+      engine.setLane(n, change);
       scheduler.changed(n);
     },
     /** Gate, Velocity, Accent: from the next note. */
     articulate(n: number, change: Pick<LaneParams, "gate" | "velocity" | "accent">) {
-      Object.assign(state.params[n], change);
-      configure();
+      engine.setLane(n, change);
       scheduler.changedNow(n);
     },
     voice(n: number, voice: number, on: boolean) {
       if (!engine.setVoice(n, voice, on, scheduler.changePosition())) return;
-      configure();
       for (let m = 0; m < LANES; m++) scheduler.changedNow(m);
     },
     /** A Split as Voicing Matrix clicks: the wanted Voices on first (taking them off other Lanes), then the rest off. */
@@ -52,12 +48,10 @@ function hub(engine: ReturnType<typeof createEngine>, scheduler: ReturnType<type
         for (let v = 1; v <= 4; v++) if (!(layout[n] ?? []).includes(v)) controls.voice(n, v, false);
     },
     scale(scale: Scale) {
-      state.scale = scale;
-      configure();
+      engine.setSong({ scale });
       for (let n = 0; n < LANES; n++) scheduler.changed(n);
     },
     capture(n: number) {
-      configure();
       engine.capture(n, scheduler.captureCycle(n));
       scheduler.changed(n);
     },
@@ -69,7 +63,6 @@ function hub(engine: ReturnType<typeof createEngine>, scheduler: ReturnType<type
   return controls;
 }
 
-type HubState = { params: LaneParams[]; scale: Scale; resetBars: number };
 type Note = [tick: number, id: number, velocity: number]; // id = voice * 1000 + pitch
 
 /** A stretch of playback from `start`. The transport stops between stretches (`stopped` runs while it is stopped,
@@ -86,12 +79,8 @@ export type SimOptions = {
 };
 
 export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, setup, edits = [] }: SimOptions) {
-  const state: HubState = {
-    params: DEFAULT_LANES.map((lane) => ({ ...lane, pitchCycle: [...(lane.pitchCycle ?? [0])] })),
-    scale: { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] },
-    resetBars,
-  };
   const engine = createEngine();
+  engine.configure({ lanes: DEFAULT_LANES, resetBars });
   const resetTicks = resetBars ? resetBars * TICKS_PER_BAR : 1e12;
   const table = new Map<number, number[]>();
   const noted: (number | undefined)[] = []; // the bank each Lane's player notes it's playing
@@ -132,7 +121,7 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
       else table.set(command.key, command.notes.flat());
     },
   });
-  const controls = hub(engine, scheduler, state);
+  const controls = hub(engine, scheduler);
 
   const release = (n: number, voices: readonly number[]) => {
     for (const id of [...held[n]])
@@ -157,7 +146,6 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
     scheduler.poll(at);
   };
 
-  engine.configure({ lanes: state.params, scale: state.scale, resetBars });
   scheduler.start();
   setup?.(controls);
   let previous = -Infinity;
@@ -225,15 +213,17 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
     }
     return on;
   };
-  return { stream, clobbers, state, engine, heldAt };
+  const lanes = () => Array.from({ length: LANES }, (_, n) => engine.laneSettings(n));
+  return { stream, clobbers, engine, lanes, heldAt };
 }
 
 /** What the engine says each Voice should receive between two song ticks, chaining carried note-offs from Cycle
  * to Cycle, for the settings a simulation ended with. */
 export function expected(sim: ReturnType<typeof simulate>, from: number, to: number): Note[][] {
-  const { params, scale, resetBars } = sim.state;
+  const params = sim.lanes();
+  const { resetBars } = sim.engine.songSettings();
   const e = createEngine();
-  e.configure({ lanes: params, scale, resetBars });
+  e.configure({ lanes: params, ...sim.engine.songSettings() });
   e.setVoiceLayout(params.map((_, n) => sim.engine.laneVoices(n)));
   const resetTicks = resetBars * TICKS_PER_BAR;
   return params.map((_, n) => {
