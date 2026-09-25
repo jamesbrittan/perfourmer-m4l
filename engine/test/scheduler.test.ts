@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEngine, createScheduler } from "../src/index";
+import { createEngine, createScheduler, FEELS, STRAIGHT_RATES } from "../src/index";
 import { between, expected, simulate, type Controls, type SimOptions } from "./player-model";
 
 const BAR = 1920;
@@ -152,7 +152,6 @@ describe("Random edits while playing", () => {
     const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     const scales = [[0, 2, 4, 5, 7, 9, 11], [0, 3, 5, 7, 10], [0, 2, 3, 5, 7, 8, 10]];
     const splits = ["1+1+1+1", "4", "1+3", "2+2", "1+1+2"] as const;
-    const rates = ["1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16Q", "1/16T", "1/16S", "1/32", "1/32Q"] as const;
     const problems: string[] = [];
     for (let trial = 0; trial < 60; trial++) {
       const start = 2 * Math.floor(rand() * 50000);
@@ -165,7 +164,7 @@ describe("Random edits while playing", () => {
         const v = Array.from({ length: 9 }, () => rand());
         const fn = (c: Controls) => {
           if (kind === 0) c.lane(n, { pitchCycle: v.slice(1, 2 + Math.floor(v[0] * 8)).map((x) => Math.floor(x * 15) - 7) });
-          else if (kind === 1) c.lane(n, { hits: 1 + Math.floor(v[0] * 5), length: 1 + Math.floor(v[1] * 8), rotate: Math.floor(v[2] * 4), rate: rates[Math.floor(v[3] * 12)] });
+          else if (kind === 1) c.lane(n, { hits: 1 + Math.floor(v[0] * 5), length: 1 + Math.floor(v[1] * 8), rotate: Math.floor(v[2] * 4), rate: STRAIGHT_RATES[Math.floor(v[3] * 6)], feel: FEELS[Math.floor(v[4] * 5)] });
           else if (kind === 2) c.lane(n, { transpose: Math.floor(v[0] * 5) - 2, octave: Math.floor(v[1] * 3) - 1 });
           else if (kind === 3) c.articulate(n, { gate: 1 + Math.floor(v[1] * 100), velocity: 1 + Math.floor(v[2] * 127), accent: Math.floor(v[3] * 40) });
           else if (kind === 4) c.scale({ root: 0, intervals: scales[Math.floor(v[0] * 3)] });
@@ -182,8 +181,14 @@ describe("Random edits while playing", () => {
       if (sim.clobbers) problems.push(`trial ${trial}: ${sim.clobbers} writes into a playing bank`);
       if (hanging(sim, end).length) problems.push(`trial ${trial}: hanging notes ${JSON.stringify(hanging(sim, end))}`);
       // Judge the last bars, long after the last edit. Cycles longer than that can't be judged, nor Cycles shorter than
-      // the script's round trip: a Cycle is rendered as the one before it starts, so those play a Cycle behind.
-      const judged = (n: number) => sim.engine.cycleTicks(n) <= BAR * 3 && sim.engine.cycleTicks(n) > 3 * latency + 20;
+      // the script's round trip (including the sliver of a Cycle a Reset leaves): a Cycle is rendered as the one
+      // before it starts, so those play a Cycle behind.
+      const shortest = (n: number) => {
+        const cycle = sim.engine.cycleTicks(n);
+        const sliver = resetBars ? (resetBars * BAR) % cycle : 0;
+        return sliver > 1e-6 ? Math.min(cycle, sliver) : cycle;
+      };
+      const judged = (n: number) => sim.engine.cycleTicks(n) <= BAR * 3 && shortest(n) > 3 * latency + 20;
       const [from, to] = [start + BAR * (bars - 4), end - 480];
       const want = expected(sim, from, to);
       const got = between(sim, from, to);
