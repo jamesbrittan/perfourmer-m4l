@@ -10,9 +10,9 @@ export const VOICES = 4;
 export const PITCH_STEPS = 8;
 
 /** The native player: its table resolution in ticks (it reads slot floor(position / gridTicks)), the table key
- * layout ((lane * 2 + bank) * bankSize + slot), the Reset period meaning "never" (usable in its modulo), and the
+ * layout ((lane * 2 + bank) * bankSize + slot; a bank must hold the longest Cycle's slots), the Reset period meaning "never" (usable in its modulo), and the
  * dict it notes each Lane's playing bank in. */
-export const PLAYER = { gridTicks: 2, bankSize: 10000, noReset: 1e12, dict: "pf4.player" } as const;
+export const PLAYER = { gridTicks: 2, bankSize: 100000, noReset: 1e12, dict: "pf4.player" } as const;
 
 /** The player's position in a Cycle as a Max expr ($f1 song ticks, $f2 Cycle length, $f3 Reset period): the same
  * as the engine's locate(). */
