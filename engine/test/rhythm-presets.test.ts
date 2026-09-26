@@ -2,42 +2,32 @@ import { describe, expect, it } from "vitest";
 import { createEngine, RHYTHM_PRESETS } from "../src/index";
 import { asPattern } from "./helpers";
 
+// The curated library (issue #35): short names, each with its hits/length, all Euclidean
 const EXPECTED_PATTERNS: Record<string, string> = {
-  // Electronic / Genre rhythms
-  "Four-on-the-floor 4/16": "x...x...x...x...",
+  // Grid and metric anchors
+  "Four-on-floor 4/16": "x...x...x...x...",
   "Offbeat 4/16": "..x...x...x...x.",
-  "Straight 16ths 16/16": "xxxxxxxxxxxxxxxx",
-  "Syncopated 5/16": "x..x..x..x..x...",
+  "Ostinato 16/16": "xxxxxxxxxxxxxxxx",
+  // 16-step syncopations and club grooves
+  "Dotted 8th 5/16": "x..x..x..x..x...",
   "3-against-4 3/16": "x....x....x.....",
-  "Phase 12 8/12": "x.xx.xx.xx.x",
-  "Phase 13 8/13": "x.xx.x.xx.x.x",
-
-  // Toussaint, "The Euclidean Algorithm Generates Traditional Musical Rhythms" (2005)
-  "Khafif-e-ramal 2/5": "x.x..",
-  "Cumbia 3/4": "x.xx",
-  "Romanian folk 3/5": "x.x.x",
-  "Ruchenitza 3/7": "x.x.x..",
-  "Tresillo 3/8": "x..x..x.",
-  "Ruchenitza 4/7": "x.x.x.x",
-  "Aksak 4/9": "x.x.x.x..",
-  "Outside Now 4/11": "x..x..x..x.",
-  "York-Samai 5/6": "x.xxxx",
-  "Nawakhat 5/7": "x.xx.xx",
-  "Cinquillo 5/8": "x.xx.xx.",
-  "Agsag-Samai 5/9": "x.x.x.x.x",
-  "Moussorgsky 5/11": "x.x.x.x.x..",
-  "Venda 5/12": "x..x.x..x.x.",
-  "Bossa nova 5/16": "x..x..x..x..x...",
-  "Tuareg 7/8": "x.xxxxxx",
-  "West African bell 7/12": "x.xx.x.xx.x.",
   "Samba 7/16": "x..x.x.x..x.x.x.",
   "Central African 9/16": "x.xx.x.x.xx.x.x.",
-  "Aka 11/24": "x..x.x.x.x.x..x.x.x.x.x.",
-  "Aka upper sangha 13/24": "x.xx.x.x.x.x.xx.x.x.x.x.",
+  // 8-step claves and timelines
+  "Tresillo 3/8": "x..x..x.",
+  "Cinquillo 5/8": "x.xx.xx.",
+  "Tuareg 7/8": "x.xxxxxx",
+  // Minimalist and polymetric phasing
+  "Detroit 2/5": "x.x..",
+  "Ostinato 3/5": "x.x.x",
+  "Phasing 3/7": "x.x.x..",
+  "Outside Now 4/11": "x..x..x..x.",
+  "Bell 7/12": "x.xx.x.xx.x.",
+  "Phase Pair 8/13": "x.xx.x.xx.x.x",
 };
 
 describe("Rhythm Presets", () => {
-  it("are the genre and published Euclidean rhythms, each rendering its expected pattern", () => {
+  it("are the curated library of 16 Euclidean rhythms, each rendering its expected pattern", () => {
     expect(RHYTHM_PRESETS.map((p) => p.name)).toEqual(Object.keys(EXPECTED_PATTERNS));
     for (const { name, hits, length, rotate } of RHYTHM_PRESETS) {
       const engine = createEngine();
