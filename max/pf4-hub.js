@@ -401,20 +401,14 @@ function where(songTicks) {
   polledAt = songTicks;
   if (playing && engine.retireVoiceLayout(songTicks)) showLaneVoices();
   for (let n = 0; n < LANES; n++) {
-    const { cycleIndex, offsetTicks } = engine.locate(n, songTicks);
+    const { cycleIndex, step, rows, mutated, captureDepth } = engine.laneView(n, songTicks);
     follow(n, cycleIndex);
-    const step = Math.floor(offsetTicks / (engine.cycleTicks(n) / params[n].length)) + 1;
-    const mutated = engine.isMutated(n, cycleIndex) ? " · mutated" : "";
-    outlet(4, n, "set", `Cycle ${cycleIndex + 1} · step ${step}/${params[n].length}${mutated}`);
-    const depth = engine.captureDepth(n);
-    outlet(4, LANES + n, "set", depth ? `captured${depth > 1 ? ` ×${depth}` : ""}` : "Euclidean");
+    const length = params[n].length;
+    outlet(4, n, "set", `Cycle ${cycleIndex + 1} · step ${step + 1}/${length}${mutated ? " · mutated" : ""}`);
+    outlet(4, LANES + n, "set", captureDepth ? `captured${captureDepth > 1 ? ` ×${captureDepth}` : ""}` : "Euclidean");
     // pattern view: ● hit, · rest; the playhead step shows as ◉ (hit) or ○ (rest)
-    const view = engine.hitSteps(n, cycleIndex).map((hit, i) => (i === step - 1 ? (hit ? "◉" : "○") : hit ? "●" : "·"));
-    const lines = [];
-    for (let i = 0; i < view.length; i += 16) {
-      lines.push(view.slice(i, i + 16).join(" "));
-    }
-    outlet(8, n, "set", lines.join("\n"));
+    const glyph = (hit, i) => (i === step ? (hit ? "◉" : "○") : hit ? "●" : "·");
+    outlet(8, n, "set", rows.map((row, r) => row.map((hit, i) => glyph(hit, r * rows[0].length + i)).join(" ")).join("\n"));
   }
 }
 

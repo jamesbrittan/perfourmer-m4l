@@ -54,7 +54,7 @@ describe("Loading a Rhythm Preset", () => {
     engine.configure({ lanes: [{ hits: 5, length: 8, rotate: 2, mutation: 127, seed: 1 }] });
     engine.capture(0, 3); // an earlier happy accident
     engine.configure({ lanes: [{ ...tresillo, mutation: 127, seed: 1 }] });
-    expect(engine.isMutated(0, 5)).toBe(true);
+    expect(engine.laneView(0, 5 * 960).mutated).toBe(true);
     engine.revert(0);
     engine.configure({ lanes: [{ ...tresillo, mutation: 0, seed: 1 }] });
     expect(asPattern(engine.renderCycle(0, 5), 8)).toBe("x..x..x.");

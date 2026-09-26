@@ -136,6 +136,11 @@ export type Slot = { slot: number; notes: [number, number, number][] };
 /** A note-off that falls past the end of a Cycle, due at `slot` of the next one. */
 export type Carry = { slot: number; voice: number; pitch: number; tie: boolean };
 export type CycleTable = { slots: Slot[]; carry: Carry[] };
+/** What a Lane shows at a song position: its Cycle, the playhead step (from 0), the Cycle's steps in rows of 16
+ * (true = a hit sounds), whether Mutation or probability changed it from the Base, and the Capture depth. */
+export type LaneView = { cycleIndex: number; step: number; rows: boolean[][]; mutated: boolean; captureDepth: number };
+
+const VIEW_ROW = 16;
 
 const MIDDLE_C = 60;
 /** A Voice Layout change made while playing waits for a bar at least this far ahead (an eighth note), so the
@@ -191,6 +196,8 @@ export function createEngine() {
   let layoutChange: { from: VoiceLayout; at: number } = { from: voiceLayout, at: 0 };
   let ticksPerBar = 1920;
   let resetTicks = 0; // 0 = Lanes never realign
+  let basesChanged = 0; // counts changes to the Captured Bases, so a cached Lane view knows it's out of date
+  const views = new Map<number, { key: string; view: Omit<LaneView, "step"> }>();
   const voiceDevices = new Map<number, number>(); // Voice device id -> Voice number
 
   /**
@@ -445,8 +452,10 @@ export function createEngine() {
       lanes = config.lanes;
       for (const [lane, entry] of captures) {
         const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
-        if (matches) entry.waiting = false;
-        else if (!entry.waiting) captures.delete(lane);
+        if (matches && entry.waiting) entry.waiting = false;
+        else if (!matches && !entry.waiting) captures.delete(lane);
+        else continue;
+        basesChanged++;
       }
       scale = config.scale ?? C_MAJOR;
       ticksPerBar = config.ticksPerBar ?? 1920;
@@ -487,11 +496,27 @@ export function createEngine() {
     },
     cycleTable,
     slotTable,
-    /** Which of the Lane's steps sound in a Cycle (for display). */
-    hitSteps(lane: number, cycleIndex: number): boolean[] {
-      const step = stepTicks(lane);
-      const onsets = new Set(cycleHits(lane, cycleIndex).map((h) => Math.round(h.onset / step)));
-      return Array.from({ length: lanes[lane].length }, (_, i) => onsets.has(i));
+    /** What the Lane shows at a song position (the pattern view and readouts). The Cycle is worked out once and
+     * kept until it or the Lane's settings change, so polling is cheap. */
+    laneView(lane: number, songTicks: number): LaneView {
+      const { cycleIndex, offsetTicks } = locate(lane, songTicks);
+      const step = Math.floor(offsetTicks / stepTicks(lane));
+      const key = `${cycleIndex}|${resetTicks}|${basesChanged}|${JSON.stringify(lanes[lane])}`;
+      const cached = views.get(lane);
+      if (cached?.key === key) return { ...cached.view, step };
+      const heard = cycleHits(lane, cycleIndex);
+      const onsets = new Set(heard.map((h) => Math.round(h.onset / stepTicks(lane))));
+      const steps = Array.from({ length: lanes[lane].length }, (_, i) => onsets.has(i));
+      const rows: boolean[][] = [];
+      for (let i = 0; i < steps.length; i += VIEW_ROW) rows.push(steps.slice(i, i + VIEW_ROW));
+      const view = {
+        cycleIndex,
+        rows,
+        mutated: JSON.stringify(heard) !== JSON.stringify(cycleHits(lane, cycleIndex, false)),
+        captureDepth: active(lane)?.stack.length ?? 0,
+      };
+      views.set(lane, { key, view });
+      return { ...view, step };
     },
     /** Make the Cycle's sounding pattern the Lane's new Base (the previous one is kept for Revert). */
     capture(lane: number, cycleIndex: number) {
@@ -506,20 +531,18 @@ export function createEngine() {
       const entry = active(lane) ?? { signature: signature(lanes[lane]), stack: [] };
       entry.stack.push({ steps, degrees });
       captures.set(lane, entry);
+      basesChanged++;
     },
     /** Go back to the Base from before the last Capture. */
     revert(lane: number) {
       const entry = active(lane);
       entry?.stack.pop();
       if (entry && !entry.stack.length) captures.delete(lane);
+      basesChanged++;
     },
     /** How many Captured Bases the Lane has (Revert steps back through them); 0 = its Euclidean pattern. */
     captureDepth(lane: number) {
       return active(lane)?.stack.length ?? 0;
-    },
-    /** Whether Mutation or probability make the Cycle depart from the Base. */
-    isMutated(lane: number, cycleIndex: number) {
-      return JSON.stringify(cycleHits(lane, cycleIndex)) !== JSON.stringify(cycleHits(lane, cycleIndex, false));
     },
     /** Every Lane's Captured Bases as plain numbers, for storing with the set. */
     saveBases(): number[] {
@@ -532,6 +555,7 @@ export function createEngine() {
     },
     loadBases(data: number[]) {
       captures.clear();
+      basesChanged++;
       if (data[0] !== 1) return;
       let i = 2;
       for (let n = 0; n < data[1]; n++) {
