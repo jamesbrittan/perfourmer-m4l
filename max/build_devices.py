@@ -238,10 +238,10 @@ LANE_DEFAULTS = [
     (5, 13, 0, 6),   # L4: 5 of 13, rot 0, rate 1/16 (index 6)
 ]  # must match params in pf4-hub.js
 PITCH_DEFAULTS = [
-    ([0, 0, 7, 0, 5], -2),
-    ([0, 3], -1),
-    ([0, 2, 4], 0),
-    ([7, 9, 11, 12, 14], 1),
+    ([0], 0),
+    ([0], 0),
+    ([0], 0),
+    ([0], 0),
 ]  # (Pitch Cycle, octave)
 PITCH_STEPS = 8
 ARTICULATION_DEFAULTS = [
