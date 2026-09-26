@@ -373,9 +373,13 @@ function where(songTicks) {
     const { length } = engine.laneSettings(n);
     outlet(OUT.readouts, n, "set", `Cycle ${cycleIndex + 1} · step ${step + 1}/${length}${mutated ? " · mutated" : ""}`);
     outlet(OUT.readouts, LANES + n, "set", captureDepth ? `captured${captureDepth > 1 ? ` ×${captureDepth}` : ""}` : "Euclidean");
-    // pattern view: ● hit, · rest; the playhead step shows as ◉ (hit) or ○ (rest)
-    const glyph = (hit, i) => (i === step ? (hit ? "◉" : "○") : hit ? "●" : "·");
-    outlet(OUT.patterns, n, "set", rows.map((row, r) => row.map((hit, i) => glyph(hit, r * rows[0].length + i)).join(" ")).join("\n"));
+    // pattern view: ● hit, · rest; the playhead step (◉ hit, ○ rest) goes on an overlay in its own colour, and the
+    // pattern leaves a gap under it. No-break spaces pad both, so Max keeps leading blanks and the columns line up
+    const gap = "\u00a0";
+    const draw = (glyph) =>
+      rows.map((row, r) => row.map((hit, i) => glyph(hit, r * rows[0].length + i === step)).join(gap)).join("\n");
+    outlet(OUT.patterns, n, "set", draw((hit, playhead) => (playhead ? gap : hit ? "●" : "·")));
+    outlet(OUT.patterns, LANES + n, "set", draw((hit, playhead) => (playhead ? (hit ? "◉" : "○") : gap)));
   }
 }
 

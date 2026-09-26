@@ -237,14 +237,15 @@ var RANGES = {
   seed: [0, 999]
 };
 var LANE_DEFAULTS = [
-  { hits: 16, length: 16, pitchCycle: [0, 0, 7, 0, 5], octave: -2, accent: 15 },
-  { hits: 4, length: 16, rotate: 2, pitchCycle: [0, 3], octave: -1, gate: 30 },
-  { hits: 2, length: 7, rate: "1/4", pitchCycle: [0, 2, 4], gate: 100, velocity: 90 },
-  { hits: 5, length: 13, pitchCycle: [7, 9, 11, 12, 14], octave: 1, velocity: 85, mutation: 20 }
+  { hits: 16, length: 16, accent: 15 },
+  { hits: 4, length: 16, rotate: 2, gate: 30 },
+  { hits: 2, length: 7, rate: "1/4", gate: 100, velocity: 90 },
+  { hits: 5, length: 13, velocity: 85, mutation: 20 }
 ].map((lane, n) => ({
   rotate: 0,
   rate: "1/16",
   feel: "straight",
+  pitchCycle: [0],
   transpose: 0,
   octave: 0,
   gate: 50,
