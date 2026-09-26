@@ -48,7 +48,8 @@ HELP = {
     "Rotate": ("Rotate", "Shifts the hits later by this many steps. Takes effect from the next Cycle."),
     "Rate": ("Rate", "How long each step lasts: 1/1 to 1/32, with triplets (T), quintuplets (Q) and septuplets (S). "
              "Takes effect from the next Cycle."),
-    "Rhythm": ("Rhythm Preset", "Loads a known Euclidean rhythm (Toussaint): sets Hits, Length and Rotate, making it "
+    "Rhythm": ("Rhythm Preset", "Loads one of 16 known Euclidean rhythms for electronic and minimalist music (grid "
+               "anchors, club syncopations, claves, odd-length phasing cycles): sets Hits, Length and Rotate, making it "
                "the Lane's Base. Shows — again once you change those by hand."),
     "Pitch Length": ("Pitch Cycle notes", "How many of the 8 degree boxes the Pitch Cycle uses. Each hit takes the "
                      "next degree, so when this differs from Hits the melody drifts against the rhythm."),
