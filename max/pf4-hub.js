@@ -408,13 +408,19 @@ function where(songTicks) {
     outlet(4, n, "set", `Cycle ${cycleIndex + 1} · step ${step}/${params[n].length}${mutated}`);
     const depth = engine.captureDepth(n);
     outlet(4, LANES + n, "set", depth ? `captured${depth > 1 ? ` ×${depth}` : ""}` : "Euclidean");
-    // pattern view: ● hit, · rest; the playhead step shows as ◉ (hit) or ○ (rest)
-    const view = engine.hitSteps(n, cycleIndex).map((hit, i) => (i === step - 1 ? (hit ? "◉" : "○") : hit ? "●" : "·"));
-    const lines = [];
-    for (let i = 0; i < view.length; i += 16) {
-      lines.push(view.slice(i, i + 16).join(" "));
-    }
-    outlet(8, n, "set", lines.join("\n"));
+    // pattern view: ● hit, · rest; the playhead step (◉ hit, ○ rest) goes on an overlay in its own colour, and the
+    // pattern leaves a gap under it. No-break spaces pad both, so Max keeps leading blanks and the columns line up
+    const gap = "\u00a0";
+    const hits = engine.hitSteps(n, cycleIndex);
+    const view = hits.map((hit, i) => (i === step - 1 ? gap : hit ? "●" : "·"));
+    const head = hits.map((hit, i) => (i === step - 1 ? (hit ? "◉" : "○") : gap));
+    const rows = (steps) => {
+      const lines = [];
+      for (let i = 0; i < steps.length; i += 16) lines.push(steps.slice(i, i + 16).join(gap));
+      return lines.join("\n");
+    };
+    outlet(8, n, "set", rows(view));
+    outlet(8, LANES + n, "set", rows(head));
   }
 }
 

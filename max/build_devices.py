@@ -103,7 +103,7 @@ HELP = {
                       "on Push."),
     "readout:Waiting": ("Voices found", "The Voice devices found in the rack after the Hub, and any missing or "
                         "duplicated Voice numbers."),
-    "readout:pattern": ("Pattern", "The Lane's current Cycle as it plays: ● hit, · rest, ◉/○ the playhead."),
+    "readout:pattern": ("Pattern", "The Lane's current Cycle as it plays: ● hit, · rest; the playhead is the cyan ◉ (a hit) or ○ (a rest)."),
     "readout:voices": ("Lane Voices", "Which Voices this Lane drives, and how (see Voices and Group Mode)."),
     "readout:setup": ("Perfourmer setup", "Set the Perfourmer once: Play Mode M1, synth channels 1–4 on MIDI "
                       "channels 1–4, and Edit 3 (aftertouch → cutoff) on. The Hub does all voice allocation."),
@@ -127,7 +127,7 @@ def info_for(box):
                        ("Perfourmer setup", "readout:setup"), ("Base:", "readout:Base")):
         if text.startswith(start):
             return HELP[key]
-    if text and set(text) <= set("·●◉○"):
+    if text and set(text) <= set("·●◉○ \u00a0\n"):  # a pattern view or its playhead overlay
         return HELP["readout:pattern"]
     if re.fullmatch(r"V\d+", text):
         return HELP["readout:voices"]
@@ -244,6 +244,7 @@ PITCH_DEFAULTS = [
     ([0], 0),
 ]  # (Pitch Cycle, octave)
 PITCH_STEPS = 8
+PLAYHEAD_COLOUR = [0.2, 0.85, 1.0, 1.0]
 ARTICULATION_DEFAULTS = [
     (50, 100, 15),
     (30, 100, 0),
@@ -319,7 +320,7 @@ def build_hub():
     P.c(adapter, stored, 7); P.c(stored, to_bases); P.c(to_bases, adapter)
 
     # Pattern and position routing
-    patterns = P.obj("route 0 1 2 3", 1300, Y + 120, ins=2, outs=5)
+    patterns = P.obj("route 0 1 2 3 4 5 6 7", 1300, Y + 120, ins=2, outs=9)  # 0–3 patterns, 4–7 playheads
     P.c(adapter, patterns, 8)
 
     # --- Live API (via the adapter): transport running/stopped and time signature
@@ -417,6 +418,10 @@ def build_hub():
         view = P.add("comment", 28, ry, w=252, h=20, text=initial_dots,
                      fontname="Menlo", fontsize=9.0, ins=1, outs=0)
         P.c(patterns, view, n)
+        # the playhead, drawn over the pattern in its own colour (bright cyan, unlike Live's orange accents)
+        head = P.add("comment", 28, ry, w=252, h=20, text="\u00a0", fontname="Menlo", fontsize=9.0, fontface=1,
+                     textcolor=PLAYHEAD_COLOUR, ins=1, outs=0)
+        P.c(patterns, head, LANES + n)
         if n < LANES - 1:
             P.add("live.line", 6, ry + 25, w=268, h=2, ins=1, outs=0)
 
