@@ -22,6 +22,7 @@ var index_exports = {};
 __export(index_exports, {
   CHORD_SHAPES: () => CHORD_SHAPES,
   CONTROL_NAMES: () => CONTROL_NAMES,
+  FEELS: () => FEELS,
   FREEZE_BASE: () => FREEZE_BASE,
   FREEZE_OFF: () => FREEZE_OFF,
   GROUP_MODES: () => GROUP_MODES,
@@ -35,6 +36,7 @@ __export(index_exports, {
   RATES: () => RATES,
   RHYTHM_PRESETS: () => RHYTHM_PRESETS,
   SPLITS: () => SPLITS,
+  STRAIGHT_RATES: () => STRAIGHT_RATES,
   VOICES: () => VOICES,
   controlName: () => controlName,
   createEngine: () => createEngine,
@@ -216,7 +218,7 @@ function xoroshiro128plus(seed) {
 var LANES = 4;
 var VOICES = 4;
 var PITCH_STEPS = 8;
-var PLAYER = { gridTicks: 2, bankSize: 1e4, noReset: 1e12, dict: "pf4.player" };
+var PLAYER = { gridTicks: 2, bankSize: 1e5, noReset: 1e12, dict: "pf4.player" };
 var PLAYER_POSITION = "fmod(fmod($f1,$f3),$f2)";
 var RANGES = {
   hits: [0, 32],
@@ -240,6 +242,7 @@ var LANE_DEFAULTS = [
 ].map((lane, n) => ({
   rotate: 0,
   rate: "1/16",
+  feel: "straight",
   pitchCycle: [0],
   transpose: 0,
   octave: 0,
@@ -293,6 +296,7 @@ var CONTROL_NAMES = {
   length: "dial_L{lane}_len",
   rotate: "dial_L{lane}_rot",
   rate: "dial_L{lane}_rate",
+  feel: "menu_L{lane}_feel",
   rhythm: "menu_L{lane}_rhythm"
 };
 var controlName = (kind, lane, voice = 0) => CONTROL_NAMES[kind].replace("{lane}", String(lane)).replace("{voice}", String(voice));
@@ -476,6 +480,9 @@ var RATE_TICKS = {
   "1/32Q": 48
 };
 var RATES = Object.keys(RATE_TICKS);
+var STRAIGHT_RATES = ["1/1", "1/2", "1/4", "1/8", "1/16", "1/32"];
+var FEEL_FACTORS = { straight: [1, 1], dotted: [3, 2], triplet: [2, 3], quintuplet: [4, 5], septuplet: [4, 7] };
+var FEELS = Object.keys(FEEL_FACTORS);
 var SPLITS = {
   "1+1+1+1": [[1], [2], [3], [4]],
   "4": [[1, 2, 3, 4]],
@@ -638,7 +645,8 @@ function createEngine() {
     voiceLayout = next;
   }
   function stepTicks(lane) {
-    return RATE_TICKS[lanes[lane].rate ?? "1/16"];
+    const [times, per] = FEEL_FACTORS[lanes[lane].feel ?? "straight"];
+    return RATE_TICKS[lanes[lane].rate ?? "1/16"] * times / per;
   }
   function cycleTicks(lane) {
     return lanes[lane].length * stepTicks(lane);

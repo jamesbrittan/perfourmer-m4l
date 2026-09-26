@@ -70,8 +70,14 @@ const RATE_TICKS = {
   "1/32Q": 48,
 } as const;
 export type Rate = keyof typeof RATE_TICKS;
-/** Rate names in menu order (slowest first); the Hub's Rate control indexes into this. */
+/** Every Rate name, slowest first (the straight ones, and the older combined names like 1/16T). */
 export const RATES = Object.keys(RATE_TICKS) as Rate[];
+/** The Rate control's values (slowest first); a Feel stretches or shrinks them. */
+export const STRAIGHT_RATES: Rate[] = ["1/1", "1/2", "1/4", "1/8", "1/16", "1/32"];
+/** A Rate's step length is multiplied by its Feel: dotted ×3/2, triplet ×2/3, quintuplet ×4/5, septuplet ×4/7. */
+const FEEL_FACTORS = { straight: [1, 1], dotted: [3, 2], triplet: [2, 3], quintuplet: [4, 5], septuplet: [4, 7] } as const;
+export type Feel = keyof typeof FEEL_FACTORS;
+export const FEELS = Object.keys(FEEL_FACTORS) as Feel[];
 /** pitchCycle: scale degrees, one per hit (0 = the Scale's root nearest middle C), shifted by transpose
  * degrees and octave octaves. gate runs from short to tied: up to 50% it is that percentage of one step; from 50%
  * to 100% the note stretches from half a step to the whole gap to the next hit, and at 100% it ties into the next.
@@ -85,6 +91,7 @@ export type LaneParams = {
   length: number;
   rotate: number;
   rate?: Rate;
+  feel?: Feel;
   pitchCycle?: number[];
   transpose?: number;
   octave?: number;
@@ -339,7 +346,8 @@ export function createEngine() {
   }
 
   function stepTicks(lane: number): number {
-    return RATE_TICKS[lanes[lane].rate ?? "1/16"];
+    const [times, per] = FEEL_FACTORS[lanes[lane].feel ?? "straight"];
+    return (RATE_TICKS[lanes[lane].rate ?? "1/16"] * times) / per;
   }
 
   function cycleTicks(lane: number): number {
