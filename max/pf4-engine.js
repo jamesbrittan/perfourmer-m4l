@@ -457,44 +457,27 @@ function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: repo
 
 // src/index.ts
 var RHYTHM_PRESETS = [
-  // Electronic / Genre rhythms
-  { name: "Four-on-the-floor 4/16", hits: 4, length: 16, rotate: 0 },
-  { name: "Offbeat 4/16", hits: 4, length: 16, rotate: 2 },
-  { name: "Straight 16ths 16/16", hits: 16, length: 16, rotate: 0 },
-  { name: "Syncopated 5/16", hits: 5, length: 16, rotate: 0 },
-  { name: "3-against-4 3/16", hits: 3, length: 16, rotate: 0 },
-  { name: "Phase 12 8/12", hits: 8, length: 12, rotate: 0 },
-  { name: "Phase 13 8/13", hits: 8, length: 13, rotate: 0 },
-  // Traditional Euclidean rhythms (Toussaint 2005)
-  ...[
-    ["Khafif-e-ramal", 2, 5],
-    ["Cumbia", 3, 4],
-    ["Romanian folk", 3, 5],
-    ["Ruchenitza", 3, 7],
-    ["Tresillo", 3, 8],
-    ["Ruchenitza", 4, 7],
-    ["Aksak", 4, 9],
-    ["Outside Now", 4, 11],
-    ["York-Samai", 5, 6],
-    ["Nawakhat", 5, 7],
-    ["Cinquillo", 5, 8],
-    ["Agsag-Samai", 5, 9],
-    ["Moussorgsky", 5, 11],
-    ["Venda", 5, 12],
-    ["Bossa nova", 5, 16],
-    ["Tuareg", 7, 8],
-    ["West African bell", 7, 12],
-    ["Samba", 7, 16],
-    ["Central African", 9, 16],
-    ["Aka", 11, 24],
-    ["Aka upper sangha", 13, 24]
-  ].map(([name, hits, length]) => ({
-    name: `${name} ${hits}/${length}`,
-    hits,
-    length,
-    rotate: 0
-  }))
-];
+  // Grid and metric anchors
+  ["Four-on-floor", 4, 16, 0],
+  ["Offbeat", 4, 16, 2],
+  ["Ostinato", 16, 16, 0],
+  // 16-step syncopations and club grooves
+  ["Dotted 8th", 5, 16, 0],
+  ["3-against-4", 3, 16, 0],
+  ["Samba", 7, 16, 0],
+  ["Central African", 9, 16, 0],
+  // 8-step claves and timelines
+  ["Tresillo", 3, 8, 0],
+  ["Cinquillo", 5, 8, 0],
+  ["Tuareg", 7, 8, 0],
+  // Minimalist and polymetric phasing
+  ["Detroit", 2, 5, 0],
+  ["Ostinato", 3, 5, 0],
+  ["Phasing", 3, 7, 0],
+  ["Outside Now", 4, 11, 0],
+  ["Bell", 7, 12, 0],
+  ["Phase Pair", 8, 13, 0]
+].map(([name, hits, length, rotate]) => ({ name: `${name} ${hits}/${length}`, hits, length, rotate }));
 var RATE_TICKS = {
   "1/1": 1920,
   "1/2": 960,

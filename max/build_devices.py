@@ -50,7 +50,8 @@ HELP = {
              "or shrinks it. Takes effect from the next Cycle."),
     "Feel": ("Feel", "Stretches or shrinks the Rate's step: straight, dotted (×1.5), triplet (3 in the time of 2), "
              "quintuplet (5 in 4) or septuplet (7 in 4). Takes effect from the next Cycle."),
-    "Rhythm": ("Rhythm Preset", "Loads a known Euclidean rhythm (Toussaint): sets Hits, Length and Rotate, making it "
+    "Rhythm": ("Rhythm Preset", "Loads one of 16 known Euclidean rhythms for electronic and minimalist music (grid "
+               "anchors, club syncopations, claves, odd-length phasing cycles): sets Hits, Length and Rotate, making it "
                "the Lane's Base. Shows — again once you change those by hand."),
     "Pitch Length": ("Pitch Cycle notes", "How many of the 8 degree boxes the Pitch Cycle uses. Each hit takes the "
                      "next degree, so when this differs from Hits the melody drifts against the rhythm."),
