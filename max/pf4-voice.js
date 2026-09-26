@@ -32,3 +32,46 @@ function notifydeleted() {
   if (deviceId) messnamed("pf4.hub", "bye", deviceId);
 }
 
+
+// [DEBUG-hang] stop stress test: every note this Voice sends out, tracked two ways: as a synth that ends a note on
+// its first note-off (held), and as one that counts note-ons against note-offs (stacked); plus recent history
+var sounding = {};
+var stack = {};
+var doubleOns = 0;
+var strayOffs = 0;
+var history = [];
+
+function remember(event) {
+  history.push(event + "@" + (Date.now() % 100000));
+  if (history.length > 16) history.shift();
+}
+
+function note(pitch, velocity) {
+  if (velocity > 0) {
+    if (sounding[pitch]) doubleOns++;
+    sounding[pitch] = true;
+    stack[pitch] = (stack[pitch] || 0) + 1;
+    remember("on" + pitch);
+  } else {
+    if (!sounding[pitch]) strayOffs++;
+    sounding[pitch] = false;
+    stack[pitch] = Math.max(0, (stack[pitch] || 0) - 1);
+    remember("off" + pitch);
+  }
+}
+
+function mark(what) {
+  remember(what);
+}
+
+function report(run) {
+  var held = [];
+  var stacked = 0;
+  for (var pitch in sounding) if (sounding[pitch]) held.push(pitch);
+  for (var p in stack) stacked += stack[p];
+  messnamed("pf4.test", "held", run, voice, held.length, stacked, held.length ? held.join("-") : "none",
+    "doubleOns", doubleOns, "strayOffs", strayOffs, "history", history.join(","));
+  doubleOns = 0;
+  strayOffs = 0;
+  stack = {};
+}
