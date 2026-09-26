@@ -26,10 +26,10 @@ const engine = createEngine();
 // defaults must match LANE_DEFAULTS, PITCH_DEFAULTS, ARTICULATION_DEFAULTS and EVOLUTION_DEFAULTS in build_devices.py
 // defaults must match LANE_DEFAULTS, PITCH_DEFAULTS, ARTICULATION_DEFAULTS and EVOLUTION_DEFAULTS in build_devices.py
 const params = [
-  { hits: 16, length: 16, rotate: 0, rate: "1/16", pitchCycle: [0, 0, 7, 0, 5], transpose: 0, octave: -2, gate: 50, velocity: 100, accent: 15, probability: 100, mutation: 0 },
-  { hits: 4, length: 16, rotate: 2, rate: "1/16", pitchCycle: [0, 3], transpose: 0, octave: -1, gate: 30, velocity: 100, accent: 0, probability: 100, mutation: 0 },
-  { hits: 2, length: 7, rotate: 0, rate: "1/4", pitchCycle: [0, 2, 4], transpose: 0, octave: 0, gate: 100, velocity: 90, accent: 0, probability: 100, mutation: 0 },
-  { hits: 5, length: 13, rotate: 0, rate: "1/16", pitchCycle: [7, 9, 11, 12, 14], transpose: 0, octave: 1, gate: 50, velocity: 85, accent: 0, probability: 100, mutation: 20 },
+  { hits: 16, length: 16, rotate: 0, rate: "1/16", pitchCycle: [0], transpose: 0, octave: 0, gate: 50, velocity: 100, accent: 15, probability: 100, mutation: 0 },
+  { hits: 4, length: 16, rotate: 2, rate: "1/16", pitchCycle: [0], transpose: 0, octave: 0, gate: 30, velocity: 100, accent: 0, probability: 100, mutation: 0 },
+  { hits: 2, length: 7, rotate: 0, rate: "1/4", pitchCycle: [0], transpose: 0, octave: 0, gate: 100, velocity: 90, accent: 0, probability: 100, mutation: 0 },
+  { hits: 5, length: 13, rotate: 0, rate: "1/16", pitchCycle: [0], transpose: 0, octave: 0, gate: 50, velocity: 85, accent: 0, probability: 100, mutation: 20 },
 ].map((lane, n) => ({ ...lane, seed: n + 1 }));
 
 const song = {
@@ -311,9 +311,13 @@ function where(songTicks) {
     const length = params[n].length;
     outlet(4, n, "set", `Cycle ${cycleIndex + 1} · step ${step + 1}/${length}${mutated ? " · mutated" : ""}`);
     outlet(4, LANES + n, "set", captureDepth ? `captured${captureDepth > 1 ? ` ×${captureDepth}` : ""}` : "Euclidean");
-    // pattern view: ● hit, · rest; the playhead step shows as ◉ (hit) or ○ (rest)
-    const glyph = (hit, i) => (i === step ? (hit ? "◉" : "○") : hit ? "●" : "·");
-    outlet(8, n, "set", rows.map((row, r) => row.map((hit, i) => glyph(hit, r * rows[0].length + i)).join(" ")).join("\n"));
+    // pattern view: ● hit, · rest; the playhead step (◉ hit, ○ rest) goes on an overlay in its own colour, and the
+    // pattern leaves a gap under it. No-break spaces pad both, so Max keeps leading blanks and the columns line up
+    const gap = "\u00a0";
+    const draw = (glyph) =>
+      rows.map((row, r) => row.map((hit, i) => glyph(hit, r * rows[0].length + i === step)).join(gap)).join("\n");
+    outlet(8, n, "set", draw((hit, playhead) => (playhead ? gap : hit ? "●" : "·")));
+    outlet(8, LANES + n, "set", draw((hit, playhead) => (playhead ? (hit ? "◉" : "○") : gap)));
   }
 }
 
