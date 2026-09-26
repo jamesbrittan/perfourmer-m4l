@@ -334,7 +334,11 @@ def build_hub():
     P.c(adapter, started, 5)
     stopped_now = P.obj("== 0", 1100, Y + 90, ins=2)  # 1 while the transport is stopped
     P.c(adapter, stopped_now, 5)
-    P.c(started, release_all, 0); P.c(release_all, bus)
+    # the stop arrives from v8 on Max's low-priority thread, while notes go out from the clock on the high-priority
+    # one; a release running alongside a note-on can make a Voice's flush forget that note, so it would never be
+    # released. delay 0 runs the release on the high-priority thread, between ticks
+    stop_release = P.obj("delay 0", 1000, Y + 135, ins=2)
+    P.c(started, stop_release, 0); P.c(stop_release, release_all); P.c(release_all, bus)
     late_release = P.obj("delay 50", 1100, Y + 150, ins=2)   # catch any straggler after the stop
     P.c(started, late_release, 0); P.c(late_release, release_all)
     P.c(here, rollcall); P.c(rollcall, bus)          # ask Voices that loaded before us to announce
@@ -626,7 +630,8 @@ def build_hub():
         # moment late, so this can happen just after playback begins; ending the sounding note here keeps it from
         # hanging when the new bank's note-off is for a different pitch
         at_once = P.obj("t b b", lx + 120, ly + 330, ins=1, outs=2)
-        P.c(is_new, adopt_now); P.c(when_stopped, at_once); P.c(at_once, adopt_now, 1); P.c(at_once, release, 0); P.c(adopt_now, pend_bank); P.c(pend_bank, has_pending)
+        to_clock = P.obj("delay 0", lx + 120, ly + 310, ins=2)  # from v8: adopt and release between ticks, as above
+        P.c(is_new, adopt_now); P.c(when_stopped, to_clock); P.c(to_clock, at_once); P.c(at_once, adopt_now, 1); P.c(at_once, release, 0); P.c(adopt_now, pend_bank); P.c(pend_bank, has_pending)
         P.c(has_pending, adopt_t, 1)
         P.c(has_pending, release, 0)  # a Cycle boundary with nothing pending (v8 fell behind): release, don't hang
         P.c(take_now, adopt_now)
