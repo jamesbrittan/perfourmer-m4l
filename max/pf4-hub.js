@@ -20,9 +20,10 @@ outlets = 14; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>"
 // stored-only pattr that saves them with the set), 8: "<lane> set <text>" pattern view,
 // 9: "<lane> <hits> <rotate> <length>" to set a Lane's dials from a Rhythm Preset, 10: "<lane> set 0" to show the
 // Rhythm Preset menu as "—" once the dials no longer match the preset, 11: "<lane> set <text>" the Lane's Voices,
-// 12: "<lane> <voice> …" the Voices the player releases for that Lane (current and, during a Split change, previous)
+// 12: "<lane> <voice> …" the Voices the player releases for that Lane (current and, during a Voice Layout change,
+// previous), 13: scripting messages to thispatcher (Voicing Matrix buttons, enabling the Lane's controls)
 
-const { createEngine, RATES, RHYTHM_PRESETS, SPLITS, GROUP_MODES, CHORD_SHAPES } = require("pf4-engine.js");
+const { createEngine, RATES, RHYTHM_PRESETS, GROUP_MODES, CHORD_SHAPES } = require("pf4-engine.js");
 
 const GRID_TICKS = 2; // must match the player's metro
 const BANK_SIZE = 10000; // table key = (lane * 2 + bank) * BANK_SIZE + slot
@@ -38,20 +39,11 @@ const params = [
   { hits: 2, length: 7, rotate: 0, rate: "1/4", pitchCycle: [0, 2, 4], transpose: 0, octave: 0, gate: 100, velocity: 90, accent: 0, probability: 100, mutation: 0 },
   { hits: 5, length: 13, rotate: 0, rate: "1/16", pitchCycle: [7, 9, 11, 12, 14], transpose: 0, octave: 1, gate: 50, velocity: 85, accent: 0, probability: 100, mutation: 20 },
 ].map((lane, n) => ({ ...lane, seed: n + 1 }));
-const matrix = [
-  [1, 0, 0, 0],
-  [0, 1, 0, 0],
-  [0, 0, 1, 0],
-  [0, 0, 0, 1],
-];
 
 const song = {
   resetBars: 0,
   ticksPerBar: 1920,
   scale: { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] },
-  voiceLayout: [[1], [2], [3], [4]],
-  previousVoiceLayout: [[1], [2], [3], [4]],
-  splitAt: 0,
 };
 const writtenKeys = params.map(() => [[], []]);
 const bankCycle = params.map(() => [0, 0]); // the Cycle each bank holds
@@ -151,76 +143,19 @@ function bases(...data) {
   for (let n = 0; n < LANES; n++) refresh(n);
 }
 
-// Split selection (for simulation/presets)
-function split(index) {
-  const next = Object.keys(SPLITS)[index];
-  if (!next) return;
-  const layout = SPLITS[next];
-  for (let n = 0; n < LANES; n++) {
-    for (let v = 1; v <= 4; v++) {
-      const state = layout[n] && layout[n].includes(v) ? 1 : 0;
-      matrix[n][v - 1] = state;
-      outlet(13, "script", "send", `btn_L${n + 1}_V${v}`, state);
+// Voicing Matrix button (lane 0..3, voice 1..4, state 0/1): lands on the next bar while playing, at once while
+// stopped. A Voice belongs to one Lane at most, so switching it on may switch another Lane's button off.
+function voice(n, v, state) {
+  const before = [0, 1, 2, 3].map((m) => engine.laneVoices(m).slice());
+  if (!engine.setVoice(Number(n), Number(v), Boolean(Number(state)), playing ? polledAt : undefined)) return;
+  for (let m = 0; m < LANES; m++)
+    for (let w = 1; w <= 4; w++) {
+      const on = engine.laneVoices(m).includes(w);
+      if (m !== Number(n) && on !== before[m].includes(w)) outlet(13, "script", "send", `btn_L${m + 1}_V${w}`, on ? 1 : 0);
     }
-  }
-  const bar = song.ticksPerBar;
-  let at = (Math.floor(polledAt / bar) + 1) * bar;
-  if (at - polledAt < 240) at += bar;
-  const inEffect = playing && polledAt < song.splitAt ? song.previousSplit : song.split;
-  const inEffectLayout = playing && polledAt < song.splitAt ? song.previousVoiceLayout : song.voiceLayout;
-  Object.assign(song, {
-    previousSplit: playing ? inEffect : next,
-    split: next,
-    previousVoiceLayout: playing ? inEffectLayout : layout,
-    voiceLayout: layout,
-    splitAt: playing ? at : 0,
-  });
-  engine.configure({ lanes: params, ...song });
-  for (let n = 0; n < LANES; n++) {
-    if (playing) render(n, null, true);
-    else refresh(n);
-  }
-  showLaneVoices();
-  updateMatrixActiveStates();
-}
-
-// Voice Matrix: click a button (lane 0..3, v 1..4, state 0/1)
-function voice(lane, v, state) {
-  lane = Number(lane);
-  v = Number(v);
-  state = Number(state);
-  if (matrix[lane][v - 1] === state) return;
-  if (state) {
-    for (let m = 0; m < LANES; m++) {
-      if (m !== lane && matrix[m][v - 1]) {
-        matrix[m][v - 1] = 0;
-        outlet(13, "script", "send", `btn_L${m + 1}_V${v}`, 0);
-      }
-    }
-    matrix[lane][v - 1] = 1;
-  } else {
-    matrix[lane][v - 1] = 0;
-  }
-  applyVoiceLayout();
-}
-
-function applyVoiceLayout() {
-  const newLayout = [0, 1, 2, 3].map((n) =>
-    [1, 2, 3, 4].filter((v) => matrix[n][v - 1] === 1)
-  );
-  const bar = song.ticksPerBar;
-  let at = (Math.floor(polledAt / bar) + 1) * bar;
-  if (at - polledAt < 240) at += bar;
-  const inEffect = playing && polledAt < song.splitAt ? (song.previousVoiceLayout || song.voiceLayout) : song.voiceLayout;
-  Object.assign(song, {
-    previousVoiceLayout: playing ? inEffect : newLayout,
-    voiceLayout: newLayout,
-    splitAt: playing ? at : 0,
-  });
-  engine.configure({ lanes: params, ...song });
-  for (let n = 0; n < LANES; n++) {
-    if (playing) render(n, null, true);
-    else refresh(n);
+  for (let m = 0; m < LANES; m++) {
+    if (playing) render(m, null, true);
+    else refresh(m);
   }
   showLaneVoices();
   updateMatrixActiveStates();
@@ -228,7 +163,7 @@ function applyVoiceLayout() {
 
 function updateMatrixActiveStates() {
   for (let n = 0; n < LANES; n++) {
-    const count = (song.voiceLayout[n] || []).length;
+    const count = engine.laneVoices(n).length;
     const mode = params[n].groupMode || "poly";
     const gmActive = count > 0 ? 1 : 0;
     const chordActive = (count > 0 && mode === "poly") ? 1 : 0;
@@ -281,11 +216,8 @@ function group(n, modeIndex, shapeIndex) {
 
 function showLaneVoices() {
   for (let n = 0; n < LANES; n++) {
-    const prev = song.previousVoiceLayout ? song.previousVoiceLayout[n] || [] : [];
-    const curr = song.voiceLayout ? song.voiceLayout[n] || [] : [];
-    const reach = [...new Set([...prev, ...curr])];
-    outlet(12, n, ...reach);
-    const voices = curr;
+    outlet(12, n, ...engine.releaseVoices(n));
+    const voices = engine.laneVoices(n);
     const mode = voices.length > 1 ? ` ${params[n].groupMode || "poly"}` : "";
     const text = !voices.length ? "off" : voices.length === 1 ? `V${voices[0]}` : `V${voices.join("+")}${mode}`;
     outlet(11, n, "set", text);
@@ -467,11 +399,7 @@ function follow(n, cycleIndex) {
 // song position (polled a few times a second): show where each Lane is, from the engine's own locate()
 function where(songTicks) {
   polledAt = songTicks;
-  if (song.previousVoiceLayout && playing && songTicks >= song.splitAt + song.ticksPerBar) {
-    song.previousVoiceLayout = song.voiceLayout;
-    engine.configure({ lanes: params, ...song });
-    showLaneVoices();
-  }
+  if (playing && engine.retireVoiceLayout(songTicks)) showLaneVoices();
   for (let n = 0; n < LANES; n++) {
     const { cycleIndex, offsetTicks } = engine.locate(n, songTicks);
     follow(n, cycleIndex);
