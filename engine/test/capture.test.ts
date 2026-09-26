@@ -110,7 +110,7 @@ describe("Capture depth", () => {
 
 describe("Mutated from Base", () => {
   it("tells whether a Cycle departs from the Base", () => {
-    expect(setup({ mutation: 0 }).isMutated(0, 5)).toBe(false);
-    expect(setup({ mutation: 127 }).isMutated(0, 5)).toBe(true);
+    expect(setup({ mutation: 0 }).laneView(0, 5 * 960).mutated).toBe(false);
+    expect(setup({ mutation: 127 }).laneView(0, 5 * 960).mutated).toBe(true);
   });
 });
