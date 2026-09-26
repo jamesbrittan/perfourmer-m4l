@@ -105,7 +105,7 @@ HELP = {
                       "on Push."),
     "readout:Waiting": ("Voices found", "The Voice devices found in the rack after the Hub, and any missing or "
                         "duplicated Voice numbers."),
-    "readout:pattern": ("Pattern", "The Lane's current Cycle as it plays: ● hit, · rest, ◉/○ the playhead."),
+    "readout:pattern": ("Pattern", "The Lane's current Cycle as it plays: ● hit, · rest; the playhead is the cyan ◉ (a hit) or ○ (a rest)."),
     "readout:voices": ("Lane Voices", "Which Voices this Lane drives, and how (see Voices and Group Mode)."),
     "readout:setup": ("Perfourmer setup", "Set the Perfourmer once: Play Mode M1, synth channels 1–4 on MIDI "
                       "channels 1–4, and Edit 3 (aftertouch → cutoff) on. The Hub does all voice allocation."),
@@ -129,7 +129,7 @@ def info_for(box):
                        ("Perfourmer setup", "readout:setup"), ("Base:", "readout:Base")):
         if text.startswith(start):
             return HELP[key]
-    if text and set(text) <= set("·●◉○"):
+    if text and set(text) <= set("·●◉○ \u00a0\n"):  # a pattern view or its playhead overlay
         return HELP["readout:pattern"]
     if re.fullmatch(r"V\d+", text):
         return HELP["readout:voices"]
@@ -232,6 +232,7 @@ class Patch:
             f.write(header + body)
 
 
+PLAYHEAD_COLOUR = [0.2, 0.85, 1.0, 1.0]  # the pattern view's playhead: bright cyan, unlike Live's orange accents
 def from_engine(expression):
     """A value from the built engine bundle (e.g. menu choices), so the devices can't drift from the engine."""
     script = f'const engine = require("./pf4-engine.js"); console.log(JSON.stringify({expression}))'
@@ -325,8 +326,8 @@ def build_hub():
     P.c(adapter, stored_frozen, OUT["frozen"]); P.c(stored_frozen, to_frozen); P.c(to_frozen, adapter)
 
     # Pattern and position routing
-    patterns = P.obj(lanes_route(), 1300, Y + 120, ins=2, outs=LANES + 1)
-    P.c(adapter, patterns, OUT["patterns"])
+    patterns = P.obj("route " + " ".join(str(i) for i in range(2 * LANES)), 1300, Y + 120, ins=2, outs=2 * LANES + 1)
+    P.c(adapter, patterns, OUT["patterns"])  # Lanes 0–3: pattern views, 4–7: their playheads
 
     # --- Live API (via the adapter): transport running/stopped and time signature
     here = P.obj("live.thisdevice", 1000, Y, ins=1, outs=3)
@@ -425,6 +426,10 @@ def build_hub():
         view = P.add("comment", 28, ry, w=252, h=20, text=initial_dots,
                      fontname="Menlo", fontsize=9.0, ins=1, outs=0)
         P.c(patterns, view, n)
+        # the playhead, drawn over the pattern in its own colour (bright cyan, unlike Live's orange accents)
+        head = P.add("comment", 28, ry, w=252, h=20, text="\u00a0", fontname="Menlo", fontsize=9.0, fontface=1,
+                     textcolor=PLAYHEAD_COLOUR, ins=1, outs=0)
+        P.c(patterns, head, LANES + n)
         if n < LANES - 1:
             P.add("live.line", 6, ry + 25, w=268, h=2, ins=1, outs=0)
 
