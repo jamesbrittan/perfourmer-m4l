@@ -136,8 +136,9 @@ function updateMatrixActiveStates() {
   for (let n = 0; n < LANES; n++) {
     const count = engine.laneVoices(n).length;
     const mode = engine.laneSettings(n).groupMode || "poly";
-    const gmActive = count > 0 ? 1 : 0;
-    const chordActive = (count > 0 && mode === "poly") ? 1 : 0;
+    const hasVoices = count > 0 ? 1 : 0;
+    const gmActive = count >= 2 ? 1 : 0;
+    const chordActive = (count >= 2 && mode === "poly") ? 1 : 0;
 
     const gmName = controlName("groupMode", n + 1);
     const chordName = controlName("chordShape", n + 1);
@@ -152,7 +153,7 @@ function updateMatrixActiveStates() {
     outlet(OUT.script, "script", "sendbox", gmName, "ignoreclick", gmActive ? 0 : 1);
     outlet(OUT.script, "script", "sendbox", chordName, "ignoreclick", chordActive ? 0 : 1);
 
-    for (const name of rhythm) outlet(OUT.script, "script", "send", name, "active", gmActive);
+    for (const name of rhythm) outlet(OUT.script, "script", "send", name, "active", hasVoices);
 
     // Direct JS patcher access if available
     if (typeof this !== "undefined" && this.patcher && this.patcher.getnamed) {
@@ -168,7 +169,7 @@ function updateMatrixActiveStates() {
       }
       for (const name of rhythm) {
         const obj = this.patcher.getnamed(name);
-        if (obj && obj.message) obj.message("active", gmActive);
+        if (obj && obj.message) obj.message("active", hasVoices);
       }
     }
   }
@@ -296,6 +297,7 @@ function observe() {
   watch("root_note", (root) => setScale(scale, { root }));
   watch("scale_intervals", (...intervals) => setScale(scale, { intervals }));
   watch("scale_name", (name) => setScale(scale, { name }));
+  updateMatrixActiveStates();
 }
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
