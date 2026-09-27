@@ -110,6 +110,26 @@ describe("The player, fed by the scheduler", () => {
   });
 });
 
+describe("Freeze while playing", () => {
+  it("repeats the Cycle sounding when pressed, then evolves again when released, without leaving notes hanging", () => {
+    const CYCLE = 960;
+    const sim = simulate({
+      play: [{ start: 0, ticks: CYCLE * 24 }],
+      setup: (c) => (c.lane(0, { hits: 5, length: 8, rate: "1/16", mutation: 127, probability: 80 }), gap(100)(c)),
+      edits: [
+        { at: CYCLE * 6 + 300, fn: (c) => c.freeze(0, true) },
+        { at: CYCLE * 14 + 300, fn: (c) => c.freeze(0, false) },
+      ],
+    });
+    const cycle = (c: number) =>
+      sim.stream[0].filter(([t, , v]) => v > 0 && t >= CYCLE * c && t < CYCLE * (c + 1)).map(([t, id, v]) => [t % CYCLE, id, v]);
+    for (const c of [7, 9, 13]) expect(cycle(c)).toEqual(cycle(6));
+    expect([16, 17, 18].some((c) => JSON.stringify(cycle(c)) !== JSON.stringify(cycle(6)))).toBe(true);
+    expect(between(sim, CYCLE * 16, CYCLE * 24 - 480)).toEqual(expected(sim, CYCLE * 16, CYCLE * 24 - 480));
+    expect(sim.clobbers).toBe(0);
+  });
+});
+
 describe("Timing a change to the bar", () => {
   it("counts from the latest song position known: the last poll or the last Cycle boundary a Lane reported", () => {
     const engine = createEngine();

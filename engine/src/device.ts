@@ -72,7 +72,12 @@ export const HUB_OUTLETS = {
   presetMenus: 10, // "<lane> set 0": the Rhythm Preset menu back to "—"
   laneVoices: 11, // "<lane> set <text>"
   script: 12, // scripting messages to thispatcher
+  frozen: 13, // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
 } as const;
+
+/** How a Lane's Freeze is stored with the set: off, holding its Base (after a Capture while frozen), or the Cycle. */
+export const FREEZE_OFF = -1;
+export const FREEZE_BASE = -2;
 
 /** Scripting names of the controls the Hub script addresses ({lane} and {voice} count from 1). */
 export const CONTROL_NAMES = {
