@@ -339,8 +339,8 @@ def build_hub():
     P.c(started, late_release, 0); P.c(late_release, release_all)
     # a note Live gets at the moment it stops can still be left sounding on the synth (a note-off Live drops, or a
     # note-on it delivers after the release), and then every Voice believes that note has ended. Once the stop is
-    # well past, each Voice sends a note-off for every pitch it has started since the last sweep; starting playback
-    # again first cancels it
+    # well past, each Voice sends a note-off for every pitch it has started since the last sweep and All Notes Off;
+    # starting playback again first cancels it
     sweep_later = P.obj("delay 150", 1200, Y + 150, ins=2)
     cancel_sweep = P.msg("stop", 1200, Y + 135)
     sweep = P.msg("sweep", 1200, Y + 170)
@@ -732,6 +732,10 @@ def build_voice():
     V.c(route, each, 5); V.c(each, pitch_t, 2); V.c(pitch_t, this_pitch, 1, 1); V.c(pitch_t, played, 0)
     V.c(played, was_on); V.c(was_on, this_pitch); V.c(this_pitch, note_off); V.c(note_off, pk)
     V.c(each, forget, 1); V.c(forget, played)
+    # Live drops a note-off for a note it believes has ended, which after a mishandled stop can be the very note the
+    # synth is still holding; a control change isn't filtered, so the sweep ends with All Notes Off (CC 123)
+    all_off = V.msg("123 0", 420, 620)
+    V.c(each, all_off, 1); V.c(all_off, fmt, 0, 2)
     # Voice number drives filtering, MIDI channel, release addressing and the Hub announcement
     # timbre LFOs: "touch <voice> <value>" -> channel aftertouch, "cc1 <voice> <value>" -> CC1, if the voice is ours
     for k, (outlet_index, fmt_inlet) in enumerate(((3, 4), (4, 2))):
