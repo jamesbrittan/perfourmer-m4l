@@ -74,6 +74,7 @@ export const HUB_OUTLETS = {
   script: 12, // scripting messages to thispatcher
   frozen: 13, // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
   controls: 14, // "<lane> <control> <value>" to move a Lane's controls (Randomise and its Undo)
+  devicePresetMenu: 15, // "set 0": the top-level Device Preset menu back to "—"
 } as const;
 
 /** How a Lane's Freeze is stored with the set: off, holding its Base (after a Capture while frozen), or the Cycle. */

@@ -85,6 +85,8 @@ HELP = {
     "CC1 Depth": ("CC1 LFO depth", "How far the Lane's CC1 LFO sweeps (the Perfourmer's pulse width). 0 = no CC1 "
                   "sent."),
     "CC1 Rate": ("CC1 LFO rate", "Length of one CC1 sweep, in bars of four beats. Follows song position."),
+    "Device Preset": ("Device Preset", "Full-device starting point across all 4 lanes and Voicing for minimalist, "
+                      "techno, and electronic genres. Editing any control drops back to '—'."),
     "Group Mode": ("Group Mode", "How the Lane uses two or more Voices (dimmed with fewer): poly plays chords, "
                    "round-robin moves successive hits across the Voices 1 → 4, unison plays every Voice together. "
                    "Takes effect from the next Cycle."),
@@ -331,6 +333,7 @@ def build_hub():
     preset_menus = P.obj(lanes_route(), 1300, Y + 180, ins=2, outs=LANES + 1)
     P.c(adapter, preset_dials, OUT["presetDials"]); P.c(adapter, preset_menus, OUT["presetMenus"])
     presets = ["—"] + from_engine("engine.RHYTHM_PRESETS.map((p) => p.name)")
+    device_presets = ["—"] + from_engine("engine.DEVICE_PRESETS.map((p) => p.name)")
     group_modes = from_engine("engine.GROUP_MODES")
     chord_shapes = from_engine("Object.keys(engine.CHORD_SHAPES)")
     lane_voices = P.obj(lanes_route(), 1300, Y + 210, ins=2, outs=LANES + 1)
@@ -358,6 +361,12 @@ def build_hub():
 
     # Section header
     P.comment("Pattern", 28, 32, 50)
+    P.comment("Preset", 95, 32, 40)
+    dev_preset_menu = P.param("live.menu", "Device Preset", 140, 30, 0, 0, 0, w=130, h=18, short="Preset",
+                              enum=device_presets, varname="menu_device_preset")
+    to_dev_preset = P.obj("prepend devicePreset", 700, Y + 30)
+    P.c(dev_preset_menu, to_dev_preset); P.c(to_dev_preset, adapter)
+    P.c(adapter, dev_preset_menu, OUT["devicePresetMenu"])
 
     # Captured Bases pattr (stored only)
     player_state = P.obj(f"dict {PLAYER_DICT}", 1500, Y, ins=2, outs=4)
@@ -638,11 +647,13 @@ def build_hub():
         P.c(hits, lane, 0, 0); P.c(len_t, lane, 0, 1); P.c(rotate, lane, 0, 2); P.c(rate, lane, 0, 3)
         P.c(lane, prep); P.c(prep, adapter)
 
-        # Randomise / Undo: "<control> <value>" for this Lane, to the controls themselves
-        names = ["length", "hits", "rotate", "rate", "degree", "pitchLength", "probability", "mutation", "seed"]
+        # Controls router: "<control> <value>" for this Lane, to the controls themselves
+        names = ["length", "hits", "rotate", "rate", "degree", "pitchLength", "probability", "mutation", "seed",
+                 "gate", "velocity", "accent", "transpose", "octave", "groupMode", "chordShape"]
         to_control = P.obj("route " + " ".join(names), lx, Y + 1130, ins=2, outs=len(names) + 1)
         P.c(control_lanes, to_control, n)
-        for i, box in enumerate((length, hits, rotate, rate, None, plen, prob, mut, seed)):
+        for i, box in enumerate((length, hits, rotate, rate, None, plen, prob, mut, seed,
+                                 gate, vel, acc, trans, octv, gm, shape)):
             if box:
                 P.c(to_control, box, i)
         to_degree = P.obj("route " + " ".join(str(i) for i in range(PITCH_STEPS)), lx, Y + 1160, ins=2,
