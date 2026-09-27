@@ -24,6 +24,7 @@ const {
   PITCH_STEPS,
   RANDOM_GROUPS,
   randomSettings,
+  isCoprime,
 } = require("pf4-engine.js");
 
 outlets = Object.keys(OUT).length; // what each carries: HUB_OUTLETS in the engine
@@ -47,6 +48,11 @@ const scheduler = createScheduler({
   },
 });
 
+function updateCoprime(n) {
+  const { hits, length } = engine.laneSettings(n);
+  outlet(OUT.readouts, 2 * LANES + n, "set", isCoprime(hits, length) ? "coprime" : "");
+}
+
 function lane(n, hits, length, rotate, rateIndex) {
   engine.setLane(n, { hits, length, rotate, rate: RATES[rateIndex] });
   const preset = RHYTHM_PRESETS[chosenPreset[n] - 1];
@@ -54,6 +60,7 @@ function lane(n, hits, length, rotate, rateIndex) {
     chosenPreset[n] = 0;
     outlet(OUT.presetMenus, n, "set", 0);
   }
+  updateCoprime(n);
   refresh(n);
 }
 
@@ -384,6 +391,7 @@ function bang() {
   showVoices();
   showLaneVoices();
   updateMatrixActiveStates();
+  for (let n = 0; n < LANES; n++) updateCoprime(n);
 }
 
 // song position (polled a few times a second): show where each Lane is, from the engine's own locate()
@@ -391,10 +399,11 @@ function where(songTicks) {
   if (scheduler.playing) engine.retireVoiceLayout(songTicks);
   scheduler.poll(songTicks);
   for (let n = 0; n < LANES; n++) {
-    const { cycleIndex, step, rows, mutated, captureDepth } = engine.laneView(n, songTicks);
+    const { cycleIndex, step, rows, mutated, captureDepth, coprime } = engine.laneView(n, songTicks);
     const { length } = engine.laneSettings(n);
     outlet(OUT.readouts, n, "set", `Cycle ${cycleIndex + 1} · step ${step + 1}/${length}${mutated ? " · mutated" : ""}`);
-    outlet(OUT.readouts, LANES + n, "set", captureDepth ? `captured${captureDepth > 1 ? ` ×${captureDepth}` : ""}` : "Euclidean");
+    outlet(OUT.readouts, LANES + n, "set", captureDepth ? `captured${captureDepth > 1 ? ` ×${captureDepth}` : ""}` : coprime ? "Coprime" : "Euclidean");
+    outlet(OUT.readouts, 2 * LANES + n, "set", coprime ? "coprime" : "");
     // pattern view: ● hit, · rest; the playhead step (◉ hit, ○ rest) goes on an overlay in its own colour, and the
     // pattern leaves a gap under it. No-break spaces pad both, so Max keeps leading blanks and the columns line up
     const gap = "\u00a0";

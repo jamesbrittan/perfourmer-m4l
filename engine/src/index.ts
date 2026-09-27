@@ -1,7 +1,7 @@
 import { uniformInt } from "pure-rand/distribution/uniformInt";
 import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus";
 
-import { inRange } from "./device";
+import { inRange, isCoprime } from "./device";
 
 export { createScheduler, type PlayerCommand } from "./scheduler";
 export * from "./device";
@@ -124,7 +124,7 @@ export type VoiceLayout = readonly (readonly number[])[];
 export type Slot = { slot: number; notes: [number, number, number, number][] };
 /** What a Lane shows at a song position: its Cycle, the playhead step (from 0), the Cycle's steps in rows of 16
  * (true = a hit sounds), whether Mutation or probability changed it from the Base, and the Capture depth. */
-export type LaneView = { cycleIndex: number; step: number; rows: boolean[][]; mutated: boolean; captureDepth: number };
+export type LaneView = { cycleIndex: number; step: number; rows: boolean[][]; mutated: boolean; captureDepth: number; coprime: boolean };
 
 const VIEW_ROW = 16;
 
@@ -468,9 +468,11 @@ export function createEngine() {
       const key = `${cycleIndex}|${resetTicks}|${basesChanged}|${JSON.stringify(lanes[lane])}`;
       const cached = views.get(lane);
       if (cached?.key === key) return { ...cached.view, step };
+      const { length, hits } = lanes[lane];
+      const coprime = isCoprime(hits, length);
       const heard = cycleHits(lane, cycleIndex);
       const onsets = new Set(heard.map((h) => Math.round(h.onset / stepTicks(lane))));
-      const steps = Array.from({ length: lanes[lane].length }, (_, i) => onsets.has(i));
+      const steps = Array.from({ length }, (_, i) => onsets.has(i));
       const rows: boolean[][] = [];
       for (let i = 0; i < steps.length; i += VIEW_ROW) rows.push(steps.slice(i, i + VIEW_ROW));
       const view = {
@@ -478,6 +480,7 @@ export function createEngine() {
         rows,
         mutated: JSON.stringify(heard) !== JSON.stringify(cycleHits(lane, cycleIndex, false)),
         captureDepth: active(lane)?.stack.length ?? 0,
+        coprime,
       };
       views.set(lane, { key, view });
       return { ...view, step };

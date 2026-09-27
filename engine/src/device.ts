@@ -100,6 +100,22 @@ export const controlName = (kind: keyof typeof CONTROL_NAMES, lane: number, voic
 
 const clamp = (value: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, value));
 
+export function gcd(a: number, b: number): number {
+  a = Math.abs(Math.round(a));
+  b = Math.abs(Math.round(b));
+  while (b) {
+    const t = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+
+/** Whether hits and length are coprime (relatively prime), forming a true Euclidean rhythm without repeating sub-cycles. */
+export function isCoprime(hits: number, length: number): boolean {
+  return hits > 0 && hits < length && gcd(hits, length) === 1;
+}
+
 /** A Lane's settings brought inside the control ranges (only the settings given). */
 export function inRange(lane: Partial<LaneParams>): Partial<LaneParams> {
   const out: Partial<LaneParams> = { ...lane };

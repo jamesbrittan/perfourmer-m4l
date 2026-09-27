@@ -72,4 +72,14 @@ describe("A Lane's view at a song position", () => {
     e.configure({ lanes: [{ hits: 3, length: 8, rotate: 0 }] });
     expect(rows(e.laneView(0, 900))).toEqual(["x..x..x."]);
   });
+
+  it("indicates whether the pattern is a true Euclidean rhythm (coprime hits and length)", () => {
+    expect(engine({ hits: 5, length: 8 }).laneView(0, 0).coprime).toBe(true);
+    expect(engine({ hits: 3, length: 8 }).laneView(0, 0).coprime).toBe(true);
+    expect(engine({ hits: 7, length: 12 }).laneView(0, 0).coprime).toBe(true);
+    expect(engine({ hits: 4, length: 16 }).laneView(0, 0).coprime).toBe(false);
+    expect(engine({ hits: 6, length: 8 }).laneView(0, 0).coprime).toBe(false);
+    expect(engine({ hits: 0, length: 8 }).laneView(0, 0).coprime).toBe(false);
+    expect(engine({ hits: 8, length: 8 }).laneView(0, 0).coprime).toBe(false);
+  });
 });
