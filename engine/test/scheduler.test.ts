@@ -7,7 +7,7 @@ const gap = (gate: number) => (c: Controls) => [0, 1, 2, 3].forEach((n) => c.art
 
 /** Notes a Lane still holds at `tick` that began long enough ago to be hanging (tied notes may rightly last). */
 function hanging(sim: ReturnType<typeof simulate>, tick: number) {
-  return sim.state.params.flatMap((p, n) =>
+  return sim.lanes().flatMap((p, n) =>
     (p.gate ?? 50) >= 100
       ? []
       : [...sim.heldAt(n, tick)].filter(([, since]) => tick - since > 2 * sim.engine.cycleTicks(n) + 2 * BAR),

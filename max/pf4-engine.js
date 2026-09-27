@@ -420,6 +420,7 @@ function createEngine() {
   let voiceLayout = SPLITS["1+1+1+1"];
   let layoutChange = { from: voiceLayout, at: 0 };
   let ticksPerBar = 1920;
+  let resetBars = 0;
   let resetTicks = 0;
   let basesChanged = 0;
   const views = /* @__PURE__ */ new Map();
@@ -566,19 +567,44 @@ function createEngine() {
     }
     return [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes }));
   }
+  function settingsChanged() {
+    for (const [lane, entry] of captures) {
+      const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
+      if (matches && entry.waiting) entry.waiting = false;
+      else if (!matches && !entry.waiting) captures.delete(lane);
+      else continue;
+      basesChanged++;
+    }
+  }
   return {
+    /** Replace every setting: the Lanes, and the song settings (anything left out takes its default). */
     configure(config) {
-      lanes = config.lanes;
-      for (const [lane, entry] of captures) {
-        const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
-        if (matches && entry.waiting) entry.waiting = false;
-        else if (!matches && !entry.waiting) captures.delete(lane);
-        else continue;
-        basesChanged++;
-      }
+      lanes = config.lanes.map((lane) => ({ ...lane }));
       scale = config.scale ?? C_MAJOR;
       ticksPerBar = config.ticksPerBar ?? 1920;
       resetTicks = (config.resetBars ?? 0) * ticksPerBar;
+      resetBars = config.resetBars ?? 0;
+      settingsChanged();
+    },
+    /** Change some of a Lane's settings, keeping the rest. */
+    setLane(lane, change) {
+      lanes[lane] = { ...lanes[lane], ...change };
+      settingsChanged();
+    },
+    /** Change some of the song settings, keeping the rest. */
+    setSong(change) {
+      if (change.scale) scale = change.scale;
+      if (change.ticksPerBar !== void 0) ticksPerBar = change.ticksPerBar;
+      if (change.resetBars !== void 0) resetBars = change.resetBars;
+      resetTicks = resetBars * ticksPerBar;
+    },
+    /** The song settings as they stand. */
+    songSettings() {
+      return { scale, resetBars, ticksPerBar };
+    },
+    /** A Lane's settings as they stand (a copy). */
+    laneSettings(lane) {
+      return { ...lanes[lane] };
     },
     cycleTicks,
     /** The Reset period in ticks (0 = no Reset). */
@@ -686,8 +712,7 @@ function createEngine() {
         }
         captures.set(lane, { signature: taken, stack, waiting: true });
       }
-      for (const [lane, entry] of captures)
-        if (lanes[lane] && signature(lanes[lane]).join() === entry.signature.join()) entry.waiting = false;
+      settingsChanged();
     },
     voiceJoined(deviceId, voice) {
       voiceDevices.set(deviceId, voice);
