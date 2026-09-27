@@ -296,7 +296,10 @@ def build_hub():
     bus = P.obj(f"send {VOICE_BUS}", 4, Y + 700)
     hub_in = P.obj(f"receive {HUB_BUS}", 200, Y - 30, ins=0)
     P.c(adapter, table, 0, 0); P.c(adapter, pending, 1); P.c(hub_in, adapter)
-    P.c(table, shared_notes); P.c(shared_notes, bus)
+    # notes only leave while the transport runs, as the clock's own transport read reports it on the same tick (see
+    # the clock below): a note sent as Live stops can be left sounding on the synth, beyond any later note-off
+    note_gate = P.obj("gate 1 1", 4, Y + 110, ins=2)
+    P.c(table, shared_notes); P.c(shared_notes, note_gate, 0, 1); P.c(note_gate, bus)
 
     # --- Permanent Left Section (x = 0..275, y = 0..169)
     # Global Controls: Reset
@@ -365,6 +368,7 @@ def build_hub():
     delta = P.obj("- 0", 700, Y + 90, ins=2)
     contiguous = P.obj("expr ($i1 > 0) && ($i1 <= 16)", 700, Y + 110)
     P.c(clock, pos); P.c(pos, tick, 7); P.c(tick, clock_t)
+    P.c(pos, note_gate, 8, 0)  # running (1) or stopped (0): transport outputs right to left, so before this tick's notes
     P.c(clock_t, delta, 2, 0); P.c(delta, contiguous); P.c(clock_t, delta, 1, 1); P.c(clock_t, fan, 0)
     # --- timbre LFO clock: song position a few times a second (the LFOs follow the song, so they replay)
     lfo_clock = P.obj(f"metro {LFO_UPDATE_MS} @active 1", 1700, Y, ins=2)
