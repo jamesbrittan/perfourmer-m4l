@@ -552,6 +552,7 @@ export function createEngine() {
     },
   };
 }
+export * from "./device-presets";
 
 export interface PitchPreset {
   readonly name: string;

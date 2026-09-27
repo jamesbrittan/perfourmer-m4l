@@ -76,6 +76,7 @@ export const HUB_OUTLETS = {
   controls: 14, // "<lane> <control> <value>" to move a Lane's controls (Randomise and its Undo)
   pitchPresetBoxes: 15, // "<lane> <length> <deg0> ... <deg7>" from a Pitch Preset
   pitchPresetMenus: 16, // "<lane> set 0": the Pitch Preset menu back to "—"
+  devicePresetMenu: 17, // "set 0": the top-level Device Preset menu back to "—"
 } as const;
 
 /** How a Lane's Freeze is stored with the set: off, holding its Base (after a Capture while frozen), or the Cycle. */

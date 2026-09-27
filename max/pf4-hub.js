@@ -1,3 +1,45 @@
+// Device Preset menu (0 = none): full top-level starting points for all 4 lanes and Voicing.
+let chosenDevicePreset = 0;
+let loadingDevicePreset = false;
+
+function clearDevicePreset() {
+  if (chosenDevicePreset > 0 && !loadingDevicePreset) {
+    chosenDevicePreset = 0;
+    outlet(OUT.devicePresetMenu, "set", 0);
+  }
+}
+
+function devicePreset(index) {
+  chosenDevicePreset = index;
+  const preset = DEVICE_PRESETS[index - 1];
+  if (!preset) return;
+  loadingDevicePreset = true;
+
+  // 1. Set Voicing split layout
+  const layout = SPLITS[preset.split];
+  if (layout) {
+    engine.setVoiceLayout(layout, scheduler.changePosition());
+    for (let m = 0; m < LANES; m++) {
+      for (let w = 1; w <= VOICES; w++) {
+        const on = layout[m].includes(w);
+        outlet(OUT.script, "script", "send", controlName("voiceButton", m + 1, w), on ? 1 : 0);
+      }
+    }
+  }
+
+  // 2. Set each Lane's controls and update UI via OUT.controls
+  for (let n = 0; n < LANES; n++) {
+    const l = preset.lanes[n];
+    setControls(n, l);
+    engine.setLane(n, l);
+    refresh(n);
+  }
+
+  showLaneVoices();
+  updateMatrixActiveStates();
+  loadingDevicePreset = false;
+}
+
 // Hub v8 adapter: Lane parameters, Live's Scale and Voice announcements in -> engine -> player tables and status out.
 // No timing happens here: the native player plays two banks per Lane from its table, and the engine's scheduler
 // decides what goes in them (see createScheduler). This script passes it the player's reports and carries out its
@@ -11,6 +53,8 @@ const {
   controlName,
   RATES,
   RHYTHM_PRESETS,
+  DEVICE_PRESETS,
+  SPLITS,
   PITCH_PRESETS,
   GROUP_MODES,
   CHORD_SHAPES,
@@ -48,6 +92,7 @@ const scheduler = createScheduler({
 });
 
 function lane(n, hits, length, rotate, rateIndex) {
+  clearDevicePreset();
   engine.setLane(n, { hits, length, rotate, rate: RATES[rateIndex] });
   const preset = RHYTHM_PRESETS[chosenPreset[n] - 1];
   if (preset && !loadingPreset && (preset.hits !== hits || preset.length !== length || preset.rotate !== rotate)) {
@@ -62,6 +107,7 @@ function lane(n, hits, length, rotate, rateIndex) {
 const chosenPreset = Array.from({ length: LANES }, () => 0);
 let loadingPreset = false;
 function rhythm(n, index) {
+  clearDevicePreset();
   chosenPreset[n] = index;
   const preset = RHYTHM_PRESETS[index - 1];
   if (!preset) return;
@@ -87,6 +133,7 @@ function pitchPreset(n, index) {
 
 // Pitch Cycle editor: its length, then all 8 degree boxes (only the first <length> are used)
 function pitch(n, length, ...degrees) {
+  clearDevicePreset();
   const chosen = PITCH_PRESETS[chosenPitchPreset[n] - 1];
   if (chosen && !loadingPitchPreset) {
     const matches = chosen.degrees.length === length && chosen.degrees.every((d, i) => d === degrees[i]);
@@ -101,12 +148,14 @@ function pitch(n, length, ...degrees) {
 
 // Gate % (short … tied), Velocity, Accent: heard from the next note, not the next Cycle
 function articulate(n, gate, velocity, accent) {
+  clearDevicePreset();
   engine.setLane(n, { gate, velocity, accent });
   scheduler.changedNow(n);
 }
 
 // Probability %, Mutation 0–127, Seed: from the next Cycle
 function evolve(n, probability, mutation, seed) {
+  clearDevicePreset();
   engine.setLane(n, { probability, mutation, seed: seed !== undefined ? Math.round(seed) : undefined });
   refresh(n);
 }
@@ -144,6 +193,7 @@ function bases(...data) {
 // Voicing Matrix button (lane 0..3, voice 1..4, state 0/1): lands on the next bar while playing, at once while
 // stopped. A Voice belongs to one Lane at most, so switching it on may switch another Lane's button off.
 function voice(n, v, state) {
+  clearDevicePreset();
   const before = Array.from({ length: LANES }, (_, m) => engine.laneVoices(m).slice());
   if (!engine.setVoice(Number(n), Number(v), Boolean(Number(state)), scheduler.changePosition())) return;
   for (let m = 0; m < LANES; m++)
@@ -242,6 +292,7 @@ function frozen(...data) {
 // reach the engine as a turn of the knobs would. Undo puts back the controls from before the Lane's last roll.
 const beforeRoll = Array.from({ length: LANES }, () => null);
 function randomise(n, group) {
+  clearDevicePreset();
   if (n < 0) {
     for (let m = 0; m < LANES; m++) randomise(m, "lane");
     return;
@@ -260,7 +311,8 @@ function undo(n) {
 
 function setControls(n, settings) {
   const send = (control, ...values) => outlet(OUT.controls, n, control, ...values);
-  const { length, hits, rotate, rate, pitchCycle, probability, mutation, seed } = settings;
+  const { length, hits, rotate, rate, pitchCycle, probability, mutation, seed,
+          gate, velocity, accent, transpose, octave, groupMode, chordShape } = settings;
   if (length !== undefined) send("length", length); // before Hits, whose range follows Length
   if (hits !== undefined) send("hits", hits);
   if (rotate !== undefined) send("rotate", rotate);
@@ -272,10 +324,20 @@ function setControls(n, settings) {
   if (probability !== undefined) send("probability", probability);
   if (mutation !== undefined) send("mutation", mutation);
   if (seed !== undefined) send("seed", seed);
+  if (gate !== undefined) send("gate", gate);
+  if (velocity !== undefined) send("velocity", velocity);
+  if (accent !== undefined) send("accent", accent);
+  if (transpose !== undefined) send("transpose", transpose);
+  if (octave !== undefined) send("octave", octave);
+  if (groupMode !== undefined && GROUP_MODES.includes(groupMode)) send("groupMode", GROUP_MODES.indexOf(groupMode));
+  if (chordShape !== undefined && Object.keys(CHORD_SHAPES).includes(chordShape)) {
+    send("chordShape", Object.keys(CHORD_SHAPES).indexOf(chordShape));
+  }
 }
 
 // Group Mode and Chord Shape (menu indices): from the Lane's next Cycle
 function group(n, modeIndex, shapeIndex) {
+  clearDevicePreset();
   engine.setLane(n, { groupMode: GROUP_MODES[modeIndex], chordShape: Object.keys(CHORD_SHAPES)[shapeIndex] });
   refresh(n);
   showLaneVoices();
@@ -292,6 +354,7 @@ function showLaneVoices() {
 }
 
 function transpose(n, degrees, octaves) {
+  clearDevicePreset();
   engine.setLane(n, { transpose: degrees, octave: octaves });
   refresh(n);
 }
