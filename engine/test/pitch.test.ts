@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEngine, type LaneParams, type Scale } from "../src/index";
+import { createEngine, type LaneParams, type Scale, invertPitchCycle, reversePitchCycle, nudgePitchCycle } from "../src/index";
 
 const MAJOR = [0, 2, 4, 5, 7, 9, 11];
 
@@ -79,5 +79,27 @@ describe("Player table", () => {
     const noteOns = (cycleIndex: number) =>
       engine.slotTable(0, 2, cycleIndex).flatMap((s) => s.notes);
     expect(noteOns(1).map(([, pitch]) => pitch)).toEqual([65, 60, 62]);
+  });
+});
+
+describe("Pitch Quick-Tools", () => {
+  it("inverts degrees around root 0 and clamps to range", () => {
+    expect(invertPitchCycle([0, 2, 4, 7])).toEqual([0, -2, -4, -7]);
+    expect(invertPitchCycle([-3, 0, 5])).toEqual([3, 0, -5]);
+    expect(invertPitchCycle([14])).toEqual([-14]);
+    expect(invertPitchCycle([])).toEqual([0]);
+  });
+
+  it("reverses the degree sequence (retrograde)", () => {
+    expect(reversePitchCycle([0, 2, 4, 7])).toEqual([7, 4, 2, 0]);
+    expect(reversePitchCycle([3, -1, 5])).toEqual([5, -1, 3]);
+    expect(reversePitchCycle([])).toEqual([0]);
+  });
+
+  it("nudges degrees up and down by delta and clamps", () => {
+    expect(nudgePitchCycle([0, 2, 4], 1)).toEqual([1, 3, 5]);
+    expect(nudgePitchCycle([0, 2, 4], -1)).toEqual([-1, 1, 3]);
+    expect(nudgePitchCycle([13, 14], 2)).toEqual([14, 14]); // clamped at 14
+    expect(nudgePitchCycle([-13, -14], -2)).toEqual([-14, -14]); // clamped at -14
   });
 });

@@ -42,7 +42,10 @@ __export(index_exports, {
   createEngine: () => createEngine,
   createScheduler: () => createScheduler,
   inRange: () => inRange,
-  randomSettings: () => randomSettings
+  invertPitchCycle: () => invertPitchCycle,
+  nudgePitchCycle: () => nudgePitchCycle,
+  randomSettings: () => randomSettings,
+  reversePitchCycle: () => reversePitchCycle
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -301,10 +304,23 @@ var CONTROL_NAMES = {
   rotate: "dial_L{lane}_rot",
   rate: "dial_L{lane}_rate",
   rhythm: "menu_L{lane}_rhythm",
-  pitchPreset: "menu_L{lane}_pitch_preset"
+  pitchPreset: "menu_L{lane}_pitch_preset",
+  pitchTool: "menu_L{lane}_pitch_tool"
 };
 var controlName = (kind, lane, voice = 0) => CONTROL_NAMES[kind].replace("{lane}", String(lane)).replace("{voice}", String(voice));
 var clamp = (value, [lo, hi]) => Math.max(lo, Math.min(hi, value));
+function invertPitchCycle(degrees) {
+  if (!degrees.length) return [0];
+  return degrees.map((d) => d === 0 ? 0 : clamp(-d, RANGES.degree));
+}
+function reversePitchCycle(degrees) {
+  if (!degrees.length) return [0];
+  return [...degrees].reverse();
+}
+function nudgePitchCycle(degrees, delta) {
+  if (!degrees.length) return [0];
+  return degrees.map((d) => clamp(d + delta, RANGES.degree));
+}
 function inRange(lane) {
   const out = { ...lane };
   for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "seed"])

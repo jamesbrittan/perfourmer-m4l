@@ -93,12 +93,29 @@ export const CONTROL_NAMES = {
   rate: "dial_L{lane}_rate",
   rhythm: "menu_L{lane}_rhythm",
   pitchPreset: "menu_L{lane}_pitch_preset",
+  pitchTool: "menu_L{lane}_pitch_tool",
 } as const;
 
 export const controlName = (kind: keyof typeof CONTROL_NAMES, lane: number, voice = 0) =>
   CONTROL_NAMES[kind].replace("{lane}", String(lane)).replace("{voice}", String(voice));
 
 const clamp = (value: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, value));
+
+/** Melodic transformations for Pitch Cycles. */
+export function invertPitchCycle(degrees: readonly number[]): number[] {
+  if (!degrees.length) return [0];
+  return degrees.map((d) => (d === 0 ? 0 : clamp(-d, RANGES.degree)));
+}
+
+export function reversePitchCycle(degrees: readonly number[]): number[] {
+  if (!degrees.length) return [0];
+  return [...degrees].reverse();
+}
+
+export function nudgePitchCycle(degrees: readonly number[], delta: number): number[] {
+  if (!degrees.length) return [0];
+  return degrees.map((d) => clamp(d + delta, RANGES.degree));
+}
 
 /** A Lane's settings brought inside the control ranges (only the settings given). */
 export function inRange(lane: Partial<LaneParams>): Partial<LaneParams> {

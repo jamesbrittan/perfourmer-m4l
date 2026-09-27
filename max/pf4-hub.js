@@ -24,6 +24,9 @@ const {
   PITCH_STEPS,
   RANDOM_GROUPS,
   randomSettings,
+  invertPitchCycle,
+  reversePitchCycle,
+  nudgePitchCycle,
 } = require("pf4-engine.js");
 
 outlets = Object.keys(OUT).length; // what each carries: HUB_OUTLETS in the engine
@@ -83,6 +86,24 @@ function pitchPreset(n, index) {
   const degs = Array.from({ length: 8 }, (_, i) => (i < preset.degrees.length ? preset.degrees[i] : 0));
   outlet(OUT.pitchPresetBoxes, n, preset.degrees.length, ...degs);
   loadingPitchPreset = false;
+}
+
+function pitchTool(n, index) {
+  if (!index) return;
+  const current = engine.laneSettings(n).pitchCycle || [0];
+  let next = current;
+  if (index === 1) next = invertPitchCycle(current);
+  else if (index === 2) next = reversePitchCycle(current);
+  else if (index === 3) next = nudgePitchCycle(current, 1);
+  else if (index === 4) next = nudgePitchCycle(current, -1);
+  else if (index === 5) next = [0];
+
+  loadingPitchPreset = true;
+  const degs = Array.from({ length: 8 }, (_, i) => (i < next.length ? next[i] : 0));
+  outlet(OUT.pitchPresetBoxes, n, next.length, ...degs);
+  loadingPitchPreset = false;
+  chosenPitchPreset[n] = 0;
+  outlet(OUT.pitchPresetMenus, n, "set", 0);
 }
 
 // Pitch Cycle editor: its length, then all 8 degree boxes (only the first <length> are used)
