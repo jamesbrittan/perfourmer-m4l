@@ -329,6 +329,11 @@ def build_hub():
     P.c(here, observe); P.c(observe, adapter)
     stopped_now = P.obj("== 0", 1100, Y + 90, ins=2)  # 1 while the transport is stopped
     P.c(adapter, stopped_now, 5)
+    # stopping the transport ends every note at once, as Live's clips do: each Voice's makenote sends the note-offs
+    # it is holding, instead of letting notes run on for their full length
+    on_stop = P.obj("sel 0", 1100, Y + 120, ins=2, outs=2)
+    stop_notes = P.msg("stop", 1100, Y + 150)
+    P.c(adapter, on_stop, 5); P.c(on_stop, stop_notes); P.c(stop_notes, bus)
     P.c(here, rollcall); P.c(rollcall, bus)          # ask Voices that loaded before us to announce
     # position readouts: poll song position and let the engine's locate() describe each Lane
     poll = P.obj("metro 100 @active 1", 1300, Y, ins=2)
@@ -651,7 +656,7 @@ def build_voice():
     V.comment("= chain number; set this chain's External Instrument to the same MIDI channel", 4, 48, 170)
 
     rcv = V.obj(f"receive {VOICE_BUS}", 4, 200, ins=0)
-    route = V.obj("route rollcall touch cc1", 4, 230, ins=2, outs=4)
+    route = V.obj("route rollcall touch cc1 stop", 4, 230, ins=2, outs=5)
     V.c(rcv, route)
     brain = V.codebox(embedded("pf4-voice.js"), 400, 600)
     rc = V.msg("rollcall", 400, 260)
@@ -671,7 +676,9 @@ def build_voice():
     pk = V.obj("pack 0 0", 4, 490, ins=2)
     fmt = V.obj("midiformat 1", 4, 520, ins=7, outs=2)
     out = V.obj("midiout", 4, 550, ins=1, outs=0)
-    V.c(route, split, 3)
+    V.c(route, split, 4)
+    end_all = V.msg("stop", 60, 440)  # the transport stopped: makenote ends every note it is holding now
+    V.c(route, end_all, 3); V.c(end_all, make)
     V.c(split, who, 1); V.c(who, mine); V.c(mine, gate, 0, 0)   # right first: is it for this Voice?
     V.c(split, body, 0); V.c(body, gate, 1, 1)                  # then pass [pitch velocity length]
     V.c(gate, tempo_first); V.c(tempo_first, tempo, 1); V.c(tempo, to_ms, 4, 1)
