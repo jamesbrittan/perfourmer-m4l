@@ -87,6 +87,9 @@ HELP = {
     "CC1 Rate": ("CC1 LFO rate", "Length of one CC1 sweep, in bars of four beats. Follows song position."),
     "Pitch Preset": ("Pitch Preset", "Loads a melodic figure, arpeggio or ostinato into the Lane's Pitch Cycle. "
                     "Changing length or any degree drops back to '—'."),
+    "Pitch Tool": ("Pitch transformation", "Applies melodic transformations to this Lane's Pitch Cycle: "
+                   "Invert (reflect degrees around root 0), Reverse (retrograde step order), +1/-1 (nudge all "
+                   "degrees up or down), or CLR (reset to root)."),
     "Group Mode": ("Group Mode", "How the Lane uses two or more Voices (dimmed with fewer): poly plays chords, "
                    "round-robin moves successive hits across the Voices 1 → 4, unison plays every Voice together. "
                    "Takes effect from the next Cycle."),
@@ -444,10 +447,11 @@ def build_hub():
     # Tab Headers at y = 26
     # Tab 1 (Pitch) headers
     P.comment("Len", 306, 26, 24, tab=1)
-    P.comment("Pitch Cycle (scale degrees)", 336, 26, 175, tab=1)
-    P.comment("Trans", 525, 26, 32, tab=1)
-    P.comment("Oct", 560, 26, 30, tab=1)
-    P.comment("Preset", 595, 26, 45, tab=1)
+    P.comment("Pitch Cycle (scale degrees)", 332, 26, 175, tab=1)
+    P.comment("Trans", 512, 26, 30, tab=1)
+    P.comment("Oct", 544, 26, 26, tab=1)
+    P.comment("Preset", 574, 26, 44, tab=1)
+    P.comment("Tool", 622, 26, 26, tab=1)
 
     # Tab 2 (Feel) headers
     P.comment("Gate %", 325, 32, 48, tab=2)
@@ -531,12 +535,12 @@ def build_hub():
         dice_button(P, f"L{n + 1} Randomise Pitch", "Rand Pit", 286, ty + 1, f"randomise {n} pitch", adapter,
                     lx + 270, Y + 1100, tab=1)
         plen = P.param("live.numbox", f"L{n + 1} Pitch Length", 306, ty, 1, PITCH_STEPS, len(degrees),
-                       w=26, h=18, short="Len", tab=1)
-        steps = [P.param("live.numbox", f"L{n + 1} Degree {i + 1}", 336 + 23 * i, ty, *R["degree"],
-                         degrees[i] if i < len(degrees) else 0, w=22, h=18, short=f"Deg {i + 1}", tab=1)
+                       w=24, h=18, short="Len", tab=1)
+        steps = [P.param("live.numbox", f"L{n + 1} Degree {i + 1}", 332 + 22 * i, ty, *R["degree"],
+                         degrees[i] if i < len(degrees) else 0, w=21, h=18, short=f"Deg {i + 1}", tab=1)
                  for i in range(PITCH_STEPS)]
-        trans = P.param("live.numbox", f"L{n + 1} Transpose", 525, ty, *R["transpose"], d["transpose"], w=32, h=18, short="Trans", tab=1)
-        octv = P.param("live.numbox", f"L{n + 1} Octave", 560, ty, *R["octave"], octave, w=32, h=18, short="Oct", tab=1)
+        trans = P.param("live.numbox", f"L{n + 1} Transpose", 512, ty, *R["transpose"], d["transpose"], w=28, h=18, short="Trans", tab=1)
+        octv = P.param("live.numbox", f"L{n + 1} Octave", 544, ty, *R["octave"], octave, w=26, h=18, short="Oct", tab=1)
         py_l = Y + 700
         initial = " ".join(str(degrees[i] if i < len(degrees) else 0) for i in range(PITCH_STEPS))
         pitch = P.obj(f"pak {len(degrees)} {initial}", lx, py_l, ins=9)
@@ -551,7 +555,7 @@ def build_hub():
         shift = P.obj(f"pak 0 {octave}", lx + 150, py_l, ins=2)
         to_shift = P.obj(f"prepend transpose {n}", lx + 150, py_l + 30)
         P.c(trans, shift, 0, 0); P.c(octv, shift, 0, 1); P.c(shift, to_shift); P.c(to_shift, adapter)
-        pmenu = P.param("live.menu", f"L{n + 1} Pitch Preset", 595, ty, 0, 0, 0, w=48, h=18, short="Preset",
+        pmenu = P.param("live.menu", f"L{n + 1} Pitch Preset", 574, ty, 0, 0, 0, w=44, h=18, short="Preset",
                         enum=pitch_presets, tab=1, varname=name("pitchPreset", n + 1))
         to_pitch_preset = P.obj(f"prepend pitchPreset {n}", lx + 200, py_l + 60)
         P.c(pmenu, to_pitch_preset); P.c(to_pitch_preset, adapter); P.c(pitch_preset_menus, pmenu, n)
@@ -560,6 +564,10 @@ def build_hub():
         P.c(unpack_pitch, plen, 0)
         for i, step in enumerate(steps):
             P.c(unpack_pitch, step, i + 1)
+        ptool = P.param("live.menu", f"L{n + 1} Pitch Tool", 622, ty, 0, 0, 0, w=25, h=18, short="Tool",
+                        enum=["—", "↕", "⇄", "+1", "-1", "CLR"], tab=1, varname=name("pitchTool", n + 1))
+        to_pitch_tool = P.obj(f"prepend pitchTool {n}", lx + 200, py_l + 120)
+        P.c(ptool, to_pitch_tool); P.c(to_pitch_tool, adapter); P.c(pitch_preset_menus, ptool, n)
 
         # --- Tab 2: Dynamics / Articulation (Feel)
         gate_d, vel_d, acc_d = d["gate"], d["velocity"], d["accent"]
