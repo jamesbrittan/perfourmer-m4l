@@ -85,6 +85,8 @@ HELP = {
     "CC1 Depth": ("CC1 LFO depth", "How far the Lane's CC1 LFO sweeps (the Perfourmer's pulse width). 0 = no CC1 "
                   "sent."),
     "CC1 Rate": ("CC1 LFO rate", "Length of one CC1 sweep, in bars of four beats. Follows song position."),
+    "Pitch Preset": ("Pitch Preset", "Loads a melodic figure, arpeggio or ostinato into the Lane's Pitch Cycle. "
+                    "Changing length or any degree drops back to '—'."),
     "Group Mode": ("Group Mode", "How the Lane uses two or more Voices (dimmed with fewer): poly plays chords, "
                    "round-robin moves successive hits across the Voices 1 → 4, unison plays every Voice together. "
                    "Takes effect from the next Cycle."),
@@ -331,6 +333,11 @@ def build_hub():
     preset_menus = P.obj(lanes_route(), 1300, Y + 180, ins=2, outs=LANES + 1)
     P.c(adapter, preset_dials, OUT["presetDials"]); P.c(adapter, preset_menus, OUT["presetMenus"])
     presets = ["—"] + from_engine("engine.RHYTHM_PRESETS.map((p) => p.name)")
+    pitch_presets = ["—"] + from_engine("engine.PITCH_PRESETS.map((p) => p.name)")
+    pitch_preset_boxes = P.obj(lanes_route(), 1300, Y + 300, ins=2, outs=LANES + 1)
+    pitch_preset_menus = P.obj(lanes_route(), 1300, Y + 330, ins=2, outs=LANES + 1)
+    P.c(adapter, pitch_preset_boxes, OUT["pitchPresetBoxes"])
+    P.c(adapter, pitch_preset_menus, OUT["pitchPresetMenus"])
     group_modes = from_engine("engine.GROUP_MODES")
     chord_shapes = from_engine("Object.keys(engine.CHORD_SHAPES)")
     lane_voices = P.obj(lanes_route(), 1300, Y + 210, ins=2, outs=LANES + 1)
@@ -430,6 +437,7 @@ def build_hub():
     P.comment("Pitch Cycle (scale degrees)", 336, 26, 175, tab=1)
     P.comment("Trans", 525, 26, 32, tab=1)
     P.comment("Oct", 560, 26, 30, tab=1)
+    P.comment("Preset", 595, 26, 45, tab=1)
 
     # Tab 2 (Feel) headers
     P.comment("Gate %", 325, 32, 48, tab=2)
@@ -533,6 +541,15 @@ def build_hub():
         shift = P.obj(f"pak 0 {octave}", lx + 150, py_l, ins=2)
         to_shift = P.obj(f"prepend transpose {n}", lx + 150, py_l + 30)
         P.c(trans, shift, 0, 0); P.c(octv, shift, 0, 1); P.c(shift, to_shift); P.c(to_shift, adapter)
+        pmenu = P.param("live.menu", f"L{n + 1} Pitch Preset", 595, ty, 0, 0, 0, w=48, h=18, short="Preset",
+                        enum=pitch_presets, tab=1, varname=name("pitchPreset", n + 1))
+        to_pitch_preset = P.obj(f"prepend pitchPreset {n}", lx + 200, py_l + 60)
+        P.c(pmenu, to_pitch_preset); P.c(to_pitch_preset, adapter); P.c(pitch_preset_menus, pmenu, n)
+        unpack_pitch = P.obj("unpack 0 0 0 0 0 0 0 0 0", lx + 200, py_l + 90, ins=1, outs=9)
+        P.c(pitch_preset_boxes, unpack_pitch, n)
+        P.c(unpack_pitch, plen, 0)
+        for i, step in enumerate(steps):
+            P.c(unpack_pitch, step, i + 1)
 
         # --- Tab 2: Dynamics / Articulation (Feel)
         gate_d, vel_d, acc_d = d["gate"], d["velocity"], d["accent"]
