@@ -1,4 +1,4 @@
-import { createEngine, createScheduler, SPLITS, type LaneParams, type Scale, type Split } from "../src/index";
+import { createEngine, createScheduler, LANE_DEFAULTS, LANES, PLAYER, SPLITS, type LaneParams, type Scale, type Split } from "../src/index";
 
 /**
  * A model of the Hub's native player, driven by the scheduler as the Hub drives it: it plays the two banks per Lane
@@ -10,39 +10,27 @@ import { createEngine, createScheduler, SPLITS, type LaneParams, type Scale, typ
  * writing to its table, as if its Cycle boundary came part-way through the render.
  */
 
-const GRID = 2;
-const BANK = 10000;
-const LANES = 4;
+const GRID = PLAYER.gridTicks;
+const BANK = PLAYER.bankSize;
 const TICKS_PER_BAR = 1920;
-
-export const DEFAULT_LANES: LaneParams[] = [
-  { hits: 5, length: 8, rotate: 0, pitchCycle: [0, 4, 2, 5], octave: 0 },
-  { hits: 3, length: 8, rotate: 0, pitchCycle: [0, 2, 4], octave: -1 },
-  { hits: 2, length: 5, rotate: 0, pitchCycle: [0, -3], octave: -2 },
-  { hits: 7, length: 12, rotate: 0, pitchCycle: [4, 6, 7, 9, 11], octave: 0 },
-].map((lane, n) => ({ rate: "1/16", transpose: 0, gate: 50, velocity: 100, accent: 0, probability: 100, mutation: 0, ...lane, seed: n + 1 }));
 
 /** What the Hub's controls do, as the Hub passes them on. */
 export type Controls = ReturnType<typeof hub>;
 
-function hub(engine: ReturnType<typeof createEngine>, scheduler: ReturnType<typeof createScheduler>, state: HubState) {
-  const configure = () => engine.configure({ lanes: state.params, scale: state.scale, resetBars: state.resetBars });
+function hub(engine: ReturnType<typeof createEngine>, scheduler: ReturnType<typeof createScheduler>) {
   const controls = {
     /** Hits, Length, Rotate, Rate, the Pitch Cycle, Mutation …: from the Lane's next Cycle. */
     lane(n: number, change: Partial<LaneParams>) {
-      Object.assign(state.params[n], change);
-      configure();
+      engine.setLane(n, change);
       scheduler.changed(n);
     },
     /** Gate, Velocity, Accent: from the next note. */
     articulate(n: number, change: Pick<LaneParams, "gate" | "velocity" | "accent">) {
-      Object.assign(state.params[n], change);
-      configure();
+      engine.setLane(n, change);
       scheduler.changedNow(n);
     },
     voice(n: number, voice: number, on: boolean) {
       if (!engine.setVoice(n, voice, on, scheduler.changePosition())) return;
-      configure();
       for (let m = 0; m < LANES; m++) scheduler.changedNow(m);
     },
     /** A Split as Voicing Matrix clicks: the wanted Voices on first (taking them off other Lanes), then the rest off. */
@@ -53,12 +41,15 @@ function hub(engine: ReturnType<typeof createEngine>, scheduler: ReturnType<type
         for (let v = 1; v <= 4; v++) if (!(layout[n] ?? []).includes(v)) controls.voice(n, v, false);
     },
     scale(scale: Scale) {
-      state.scale = scale;
-      configure();
+      engine.setSong({ scale });
       for (let n = 0; n < LANES; n++) scheduler.changed(n);
     },
+    /** Freeze on: hold the Cycle sounding now (from the next Cycle); off: evolve again from the next Cycle. */
+    freeze(n: number, on: boolean) {
+      engine.setLane(n, { freeze: on ? scheduler.captureCycle(n) : undefined });
+      scheduler.changed(n);
+    },
     capture(n: number) {
-      configure();
       engine.capture(n, scheduler.captureCycle(n));
       scheduler.changed(n);
     },
@@ -70,7 +61,6 @@ function hub(engine: ReturnType<typeof createEngine>, scheduler: ReturnType<type
   return controls;
 }
 
-type HubState = { params: LaneParams[]; scale: Scale; resetBars: number };
 type Note = [tick: number, id: number, velocity: number]; // id = voice * 1000 + pitch
 
 /** A stretch of playback from `start`. The transport stops between stretches (`stopped` runs while it is stopped,
@@ -87,12 +77,8 @@ export type SimOptions = {
 };
 
 export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, setup, edits = [] }: SimOptions) {
-  const state: HubState = {
-    params: DEFAULT_LANES.map((lane) => ({ ...lane, pitchCycle: [...(lane.pitchCycle ?? [0])] })),
-    scale: { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] },
-    resetBars,
-  };
   const engine = createEngine();
+  engine.configure({ lanes: LANE_DEFAULTS, resetBars });
   const resetTicks = resetBars ? resetBars * TICKS_PER_BAR : 1e12;
   const table = new Map<number, number[]>();
   const noted: (number | undefined)[] = []; // the bank each Lane's player notes it's playing
@@ -134,7 +120,7 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
       else table.set(command.key, command.notes.flat());
     },
   });
-  const controls = hub(engine, scheduler, state);
+  const controls = hub(engine, scheduler);
 
   /** makenote ends the notes due by `tick` (all of them on "stop"). */
   const endNotes = (n: number, tick: number) => {
@@ -157,7 +143,6 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
     scheduler.poll(at);
   };
 
-  engine.configure({ lanes: state.params, scale: state.scale, resetBars });
   scheduler.start();
   setup?.(controls);
   let previous = -Infinity;
@@ -221,16 +206,18 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
     }
     return on;
   };
-  return { stream, clobbers, state, engine, heldAt };
+  const lanes = () => Array.from({ length: LANES }, (_, n) => engine.laneSettings(n));
+  return { stream, clobbers, engine, lanes, heldAt };
 }
 
 /** What the engine says each Voice should receive between two song ticks, for the settings a simulation ended with:
  * each note's start, and its end after its length (makenote's note-off, heard on the first tick at or after it).
  * startedFrom: only notes starting from `from` (after a stop, which ended the notes playing before it). */
 export function expected(sim: ReturnType<typeof simulate>, from: number, to: number, startedFrom = false): Note[][] {
-  const { params, scale, resetBars } = sim.state;
+  const params = sim.lanes();
+  const { resetBars } = sim.engine.songSettings();
   const e = createEngine();
-  e.configure({ lanes: params, scale, resetBars });
+  e.configure({ lanes: params, ...sim.engine.songSettings() });
   e.setVoiceLayout(params.map((_, n) => sim.engine.laneVoices(n)));
   const resetTicks = resetBars * TICKS_PER_BAR;
   return params.map((_, n) => {

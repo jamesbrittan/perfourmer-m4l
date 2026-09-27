@@ -21,12 +21,27 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var index_exports = {};
 __export(index_exports, {
   CHORD_SHAPES: () => CHORD_SHAPES,
+  CONTROL_NAMES: () => CONTROL_NAMES,
+  FREEZE_BASE: () => FREEZE_BASE,
+  FREEZE_OFF: () => FREEZE_OFF,
   GROUP_MODES: () => GROUP_MODES,
+  HUB_OUTLETS: () => HUB_OUTLETS,
+  LANES: () => LANES,
+  LANE_DEFAULTS: () => LANE_DEFAULTS,
+  PITCH_STEPS: () => PITCH_STEPS,
+  PLAYER: () => PLAYER,
+  PLAYER_POSITION: () => PLAYER_POSITION,
+  RANDOM_GROUPS: () => RANDOM_GROUPS,
+  RANGES: () => RANGES,
   RATES: () => RATES,
   RHYTHM_PRESETS: () => RHYTHM_PRESETS,
   SPLITS: () => SPLITS,
+  VOICES: () => VOICES,
+  controlName: () => controlName,
   createEngine: () => createEngine,
-  createScheduler: () => createScheduler
+  createScheduler: () => createScheduler,
+  inRange: () => inRange,
+  randomSettings: () => randomSettings
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -199,6 +214,128 @@ function xoroshiro128plus(seed) {
   return new XoroShiro128Plus(-1, ~seed, seed | 0, 0);
 }
 
+// src/device.ts
+var LANES = 4;
+var VOICES = 4;
+var PITCH_STEPS = 8;
+var PLAYER = { gridTicks: 2, bankSize: 1e4, noReset: 1e12, dict: "pf4.player" };
+var PLAYER_POSITION = "fmod(fmod($f1,$f3),$f2)";
+var RANGES = {
+  hits: [0, 32],
+  length: [1, 32],
+  rotate: [0, 31],
+  degree: [-14, 14],
+  transpose: [-7, 7],
+  octave: [-3, 3],
+  gate: [1, 100],
+  velocity: [1, 127],
+  accent: [0, 127],
+  probability: [0, 100],
+  mutation: [0, 127],
+  seed: [0, 999]
+};
+var LANE_DEFAULTS = [
+  { hits: 16, length: 16, accent: 15 },
+  { hits: 4, length: 16, rotate: 2, gate: 30 },
+  { hits: 2, length: 7, rate: "1/4", gate: 100, velocity: 90 },
+  { hits: 5, length: 13, velocity: 85, mutation: 20 }
+].map((lane, n) => ({
+  rotate: 0,
+  rate: "1/16",
+  pitchCycle: [0],
+  transpose: 0,
+  octave: 0,
+  gate: 50,
+  velocity: 100,
+  accent: 0,
+  probability: 100,
+  mutation: 0,
+  seed: n + 1,
+  groupMode: "poly",
+  chordShape: "triad",
+  ...lane
+}));
+var HUB_OUTLETS = {
+  table: 0,
+  // player table edits
+  pending: 1,
+  // "<lane> <bank> <cycleTicks> <now>" offers
+  voiceStatus: 2,
+  resetPeriod: 3,
+  // in ticks, PLAYER.noReset when off
+  readouts: 4,
+  // "<lane> set <text>": 0–3 positions, 4–7 Bases
+  transport: 5,
+  // 1 running, 0 stopped
+  scale: 6,
+  bases: 7,
+  // Captured Bases, to the stored-only pattr
+  patterns: 8,
+  // "<lane> set <text>" pattern view
+  presetDials: 9,
+  // "<lane> <hits> <rotate> <length>" from a Rhythm Preset
+  presetMenus: 10,
+  // "<lane> set 0": the Rhythm Preset menu back to "—"
+  laneVoices: 11,
+  // "<lane> set <text>"
+  script: 12,
+  // scripting messages to thispatcher
+  frozen: 13,
+  // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
+  controls: 14
+  // "<lane> <control> <value>" to move a Lane's controls (Randomise and its Undo)
+};
+var FREEZE_OFF = -1;
+var FREEZE_BASE = -2;
+var CONTROL_NAMES = {
+  voiceButton: "btn_L{lane}_V{voice}",
+  groupMode: "menu_L{lane}_gm",
+  chordShape: "menu_L{lane}_chord",
+  hits: "dial_L{lane}_hits",
+  length: "dial_L{lane}_len",
+  rotate: "dial_L{lane}_rot",
+  rate: "dial_L{lane}_rate",
+  rhythm: "menu_L{lane}_rhythm"
+};
+var controlName = (kind, lane, voice = 0) => CONTROL_NAMES[kind].replace("{lane}", String(lane)).replace("{voice}", String(voice));
+var clamp = (value, [lo, hi]) => Math.max(lo, Math.min(hi, value));
+function inRange(lane) {
+  const out = { ...lane };
+  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "seed"])
+    if (typeof out[key] === "number") out[key] = clamp(out[key], RANGES[key]);
+  if (out.pitchCycle) {
+    const degrees = out.pitchCycle.slice(0, PITCH_STEPS).map((d) => clamp(d, RANGES.degree));
+    out.pitchCycle = degrees.length ? degrees : [0];
+  }
+  return out;
+}
+var RANDOM_GROUPS = ["rhythm", "pitch", "evolution"];
+function randomSettings(current, groups, random) {
+  const int = (lo, hi) => lo + Math.floor(random() * (hi - lo + 1));
+  const pick = (choices) => choices[Math.floor(random() * choices.length)];
+  const out = {};
+  if (groups.includes("rhythm")) {
+    const length = int(3, 16);
+    out.length = length;
+    out.hits = int(1, length);
+    out.rotate = int(0, length - 1);
+    out.rate = pick(["1/8", "1/16"]);
+  }
+  if (groups.includes("pitch")) {
+    const degrees = current.pitchCycle ?? [0];
+    const centre = Math.round(degrees.reduce((a, b) => a + b, 0) / degrees.length);
+    const [lo, hi] = RANGES.degree;
+    const around = [Math.max(lo, centre - 5), Math.min(hi, centre + 5)];
+    out.pitchCycle = Array.from({ length: int(2, 6) }, () => int(...around));
+  }
+  if (groups.includes("evolution")) {
+    out.probability = int(70, 100);
+    out.mutation = int(0, 60);
+    out.seed = int(0, RANGES.seed[1]);
+  }
+  return out;
+}
+
 // src/scheduler.ts
 function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: reported, send }) {
   const each = (make) => Array.from({ length: lanes }, make);
@@ -307,44 +444,27 @@ function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: repo
 
 // src/index.ts
 var RHYTHM_PRESETS = [
-  // Electronic / Genre rhythms
-  { name: "Four-on-the-floor 4/16", hits: 4, length: 16, rotate: 0 },
-  { name: "Offbeat 4/16", hits: 4, length: 16, rotate: 2 },
-  { name: "Straight 16ths 16/16", hits: 16, length: 16, rotate: 0 },
-  { name: "Syncopated 5/16", hits: 5, length: 16, rotate: 0 },
-  { name: "3-against-4 3/16", hits: 3, length: 16, rotate: 0 },
-  { name: "Phase 12 8/12", hits: 8, length: 12, rotate: 0 },
-  { name: "Phase 13 8/13", hits: 8, length: 13, rotate: 0 },
-  // Traditional Euclidean rhythms (Toussaint 2005)
-  ...[
-    ["Khafif-e-ramal", 2, 5],
-    ["Cumbia", 3, 4],
-    ["Romanian folk", 3, 5],
-    ["Ruchenitza", 3, 7],
-    ["Tresillo", 3, 8],
-    ["Ruchenitza", 4, 7],
-    ["Aksak", 4, 9],
-    ["Outside Now", 4, 11],
-    ["York-Samai", 5, 6],
-    ["Nawakhat", 5, 7],
-    ["Cinquillo", 5, 8],
-    ["Agsag-Samai", 5, 9],
-    ["Moussorgsky", 5, 11],
-    ["Venda", 5, 12],
-    ["Bossa nova", 5, 16],
-    ["Tuareg", 7, 8],
-    ["West African bell", 7, 12],
-    ["Samba", 7, 16],
-    ["Central African", 9, 16],
-    ["Aka", 11, 24],
-    ["Aka upper sangha", 13, 24]
-  ].map(([name, hits, length]) => ({
-    name: `${name} ${hits}/${length}`,
-    hits,
-    length,
-    rotate: 0
-  }))
-];
+  // Grid and metric anchors
+  ["Four-on-floor", 4, 16, 0],
+  ["Offbeat", 4, 16, 2],
+  ["Ostinato", 16, 16, 0],
+  // 16-step syncopations and club grooves
+  ["Dotted 8th", 5, 16, 0],
+  ["3-against-4", 3, 16, 0],
+  ["Samba", 7, 16, 0],
+  ["Central African", 9, 16, 0],
+  // 8-step claves and timelines
+  ["Tresillo", 3, 8, 0],
+  ["Cinquillo", 5, 8, 0],
+  ["Tuareg", 7, 8, 0],
+  // Minimalist and polymetric phasing
+  ["Detroit", 2, 5, 0],
+  ["Ostinato", 3, 5, 0],
+  ["Phasing", 3, 7, 0],
+  ["Outside Now", 4, 11, 0],
+  ["Bell", 7, 12, 0],
+  ["Phase Pair", 8, 13, 0]
+].map(([name, hits, length, rotate]) => ({ name: `${name} ${hits}/${length}`, hits, length, rotate }));
 var RATE_TICKS = {
   "1/1": 1920,
   "1/2": 960,
@@ -420,12 +540,16 @@ function createEngine() {
   let voiceLayout = SPLITS["1+1+1+1"];
   let layoutChange = { from: voiceLayout, at: 0 };
   let ticksPerBar = 1920;
+  let resetBars = 0;
   let resetTicks = 0;
   let basesChanged = 0;
   const views = /* @__PURE__ */ new Map();
   const voiceDevices = /* @__PURE__ */ new Map();
   function cycleHits(lane, cycleIndex, evolve = true) {
-    const { hits, length, rotate, pitchCycle = [0], seed = 0 } = lanes[lane];
+    const { hits, length, rotate, pitchCycle = [0], seed = 0, freeze } = lanes[lane];
+    if (freeze === "base") evolve = false;
+    const end = playedTicks(lane, cycleIndex);
+    if (typeof freeze === "number") cycleIndex = freeze;
     const { mutation, probability } = evolve ? { mutation: 0, probability: 100, ...lanes[lane] } : { mutation: 0, probability: 100 };
     const stack = active(lane)?.stack;
     const captured = stack?.[stack.length - 1];
@@ -441,7 +565,6 @@ function createEngine() {
     let hitIndex = cyclesSinceReset(lane, cycleIndex) * baseHits;
     let count = cyclesSinceReset(lane, cycleIndex) * baseHits;
     const step = stepTicks(lane);
-    const end = playedTicks(lane, cycleIndex);
     const sounding = [];
     base.forEach((isHit, i) => {
       const [stepDraw, hitDraw, pitchDraw, degreeDraw, soundDraw] = [chance(), chance(), chance(), chance(), chance()];
@@ -566,19 +689,45 @@ function createEngine() {
     }
     return [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes }));
   }
+  function settingsChanged() {
+    for (const [lane, entry] of captures) {
+      const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
+      if (matches && entry.waiting) entry.waiting = false;
+      else if (!matches && !entry.waiting) captures.delete(lane);
+      else continue;
+      basesChanged++;
+    }
+  }
   return {
+    /** Replace every setting: the Lanes, and the song settings (anything left out takes its default). Lane
+     * settings are brought inside the control ranges (RANGES), here and in setLane. */
     configure(config) {
-      lanes = config.lanes;
-      for (const [lane, entry] of captures) {
-        const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
-        if (matches && entry.waiting) entry.waiting = false;
-        else if (!matches && !entry.waiting) captures.delete(lane);
-        else continue;
-        basesChanged++;
-      }
+      lanes = config.lanes.map((lane) => inRange(lane));
       scale = config.scale ?? C_MAJOR;
       ticksPerBar = config.ticksPerBar ?? 1920;
       resetTicks = (config.resetBars ?? 0) * ticksPerBar;
+      resetBars = config.resetBars ?? 0;
+      settingsChanged();
+    },
+    /** Change some of a Lane's settings, keeping the rest. */
+    setLane(lane, change) {
+      lanes[lane] = { ...lanes[lane], ...inRange(change) };
+      settingsChanged();
+    },
+    /** Change some of the song settings, keeping the rest. */
+    setSong(change) {
+      if (change.scale) scale = change.scale;
+      if (change.ticksPerBar !== void 0) ticksPerBar = change.ticksPerBar;
+      if (change.resetBars !== void 0) resetBars = change.resetBars;
+      resetTicks = resetBars * ticksPerBar;
+    },
+    /** The song settings as they stand. */
+    songSettings() {
+      return { scale, resetBars, ticksPerBar };
+    },
+    /** A Lane's settings as they stand (a copy). */
+    laneSettings(lane) {
+      return { ...lanes[lane] };
     },
     cycleTicks,
     /** The Reset period in ticks (0 = no Reset). */
@@ -647,6 +796,7 @@ function createEngine() {
       const entry = active(lane) ?? { signature: signature(lanes[lane]), stack: [] };
       entry.stack.push({ steps, degrees });
       captures.set(lane, entry);
+      if (lanes[lane].freeze !== void 0) lanes[lane] = { ...lanes[lane], freeze: "base" };
       basesChanged++;
     },
     /** Go back to the Base from before the last Capture. */
@@ -686,8 +836,7 @@ function createEngine() {
         }
         captures.set(lane, { signature: taken, stack, waiting: true });
       }
-      for (const [lane, entry] of captures)
-        if (lanes[lane] && signature(lanes[lane]).join() === entry.signature.join()) entry.waiting = false;
+      settingsChanged();
     },
     voiceJoined(deviceId, voice) {
       voiceDevices.set(deviceId, voice);

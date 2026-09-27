@@ -1,105 +1,97 @@
 // Hub v8 adapter: Lane parameters, Live's Scale and Voice announcements in -> engine -> player tables and status out.
 // No timing happens here: the native player plays two banks per Lane from its table, and the engine's scheduler
 // decides what goes in them (see createScheduler). This script passes it the player's reports and carries out its
-// commands on outlets 0 and 1.
+// commands on its table and pending outlets.
 autowatch = 1;
 inlets = 1;
-outlets = 13; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now>" pending (bank -1 = withdrawn; now 1 =
-// switch at the next tick rather than the next Cycle boundary),
-// 2: Voice status text,
-// 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts (lanes 4–7: Base readouts),
-// 5: transport running (1) / stopped (0), 6: "set <text>" Scale readout, 7: Captured Bases as numbers (to the
-// stored-only pattr that saves them with the set), 8: "<lane> set <text>" pattern view,
-// 9: "<lane> <hits> <rotate> <length>" to set a Lane's dials from a Rhythm Preset, 10: "<lane> set 0" to show the
-// Rhythm Preset menu as "—" once the dials no longer match the preset, 11: "<lane> set <text>" the Lane's Voices,
-// 12: scripting messages to thispatcher (Voicing Matrix buttons, enabling the Lane's controls)
 
-const { createEngine, createScheduler, RATES, RHYTHM_PRESETS, GROUP_MODES, CHORD_SHAPES } = require("pf4-engine.js");
+const {
+  createEngine,
+  createScheduler,
+  controlName,
+  RATES,
+  RHYTHM_PRESETS,
+  GROUP_MODES,
+  CHORD_SHAPES,
+  HUB_OUTLETS: OUT,
+  LANE_DEFAULTS,
+  LANES,
+  PLAYER,
+  VOICES,
+  FREEZE_OFF,
+  FREEZE_BASE,
+  PITCH_STEPS,
+  RANDOM_GROUPS,
+  randomSettings,
+} = require("pf4-engine.js");
 
-const GRID_TICKS = 2; // must match the player's metro
-const BANK_SIZE = 10000; // table key = (lane * 2 + bank) * BANK_SIZE + slot
-const LANES = 4;
-const NEVER = 1e12; // "no Reset" as a period the player's modulo can use
+outlets = Object.keys(OUT).length; // what each carries: HUB_OUTLETS in the engine
 
 const engine = createEngine();
-// defaults must match LANE_DEFAULTS, PITCH_DEFAULTS, ARTICULATION_DEFAULTS and EVOLUTION_DEFAULTS in build_devices.py
-// defaults must match LANE_DEFAULTS, PITCH_DEFAULTS, ARTICULATION_DEFAULTS and EVOLUTION_DEFAULTS in build_devices.py
-const params = [
-  { hits: 16, length: 16, rotate: 0, rate: "1/16", pitchCycle: [0], transpose: 0, octave: 0, gate: 50, velocity: 100, accent: 15, probability: 100, mutation: 0 },
-  { hits: 4, length: 16, rotate: 2, rate: "1/16", pitchCycle: [0], transpose: 0, octave: 0, gate: 30, velocity: 100, accent: 0, probability: 100, mutation: 0 },
-  { hits: 2, length: 7, rotate: 0, rate: "1/4", pitchCycle: [0], transpose: 0, octave: 0, gate: 100, velocity: 90, accent: 0, probability: 100, mutation: 0 },
-  { hits: 5, length: 13, rotate: 0, rate: "1/16", pitchCycle: [0], transpose: 0, octave: 0, gate: 50, velocity: 85, accent: 0, probability: 100, mutation: 20 },
-].map((lane, n) => ({ ...lane, seed: n + 1 }));
-
-const song = {
-  resetBars: 0,
-  ticksPerBar: 1920,
-  scale: { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] },
-};
-const player = new Dict("pf4.player"); // "lane<n>": the bank the player is playing, written as it adopts
+engine.configure({ lanes: LANE_DEFAULTS });
+const player = new Dict(PLAYER.dict); // "lane<n>": the bank the player is playing, written as it adopts
 const scheduler = createScheduler({
   engine,
   lanes: LANES,
-  gridTicks: GRID_TICKS,
-  bankSize: BANK_SIZE,
+  gridTicks: PLAYER.gridTicks,
+  bankSize: PLAYER.bankSize,
   playingBank: (n) => player.get(`lane${n}`),
   send(command) {
-    if (command.type === "write") outlet(0, [command.key].concat(...command.notes));
-    else if (command.type === "remove") outlet(0, "remove", command.key);
+    if (command.type === "write") outlet(OUT.table, [command.key].concat(...command.notes));
+    else if (command.type === "remove") outlet(OUT.table, "remove", command.key);
     else {
       const { lane, bank, cycleTicks, now } = command;
-      outlet(1, lane, bank, cycleTicks, now ? 1 : 0); // while stopped the player adopts at once
+      outlet(OUT.pending, lane, bank, cycleTicks, now ? 1 : 0); // while stopped the player adopts at once
     }
   },
 });
 
 function lane(n, hits, length, rotate, rateIndex) {
-  Object.assign(params[n], { hits, length, rotate, rate: RATES[rateIndex] });
+  engine.setLane(n, { hits, length, rotate, rate: RATES[rateIndex] });
   const preset = RHYTHM_PRESETS[chosenPreset[n] - 1];
   if (preset && !loadingPreset && (preset.hits !== hits || preset.length !== length || preset.rotate !== rotate)) {
     chosenPreset[n] = 0;
-    outlet(10, n, "set", 0);
+    outlet(OUT.presetMenus, n, "set", 0);
   }
   refresh(n);
 }
 
 // Rhythm Preset menu (0 = none): set the Lane's Hits, Length and Rotate dials to the preset. Changing Hits, Length
 // or Rotate hands the Lane back from any Captured Base, so the preset becomes the Base.
-const chosenPreset = params.map(() => 0);
+const chosenPreset = Array.from({ length: LANES }, () => 0);
 let loadingPreset = false;
 function rhythm(n, index) {
   chosenPreset[n] = index;
   const preset = RHYTHM_PRESETS[index - 1];
   if (!preset) return;
   loadingPreset = true; // the dials report back straight away, one at a time
-  outlet(9, n, preset.hits, preset.rotate, preset.length);
+  outlet(OUT.presetDials, n, preset.hits, preset.rotate, preset.length);
   loadingPreset = false;
 }
 
 // Pitch Cycle editor: its length, then all 8 degree boxes (only the first <length> are used)
 function pitch(n, length, ...degrees) {
-  params[n].pitchCycle = degrees.slice(0, length);
+  engine.setLane(n, { pitchCycle: degrees.slice(0, length) });
   refresh(n);
 }
 
 // Gate % (short … tied), Velocity, Accent: heard from the next note, not the next Cycle
 function articulate(n, gate, velocity, accent) {
-  Object.assign(params[n], { gate, velocity, accent });
-  engine.configure({ lanes: params, ...song });
+  engine.setLane(n, { gate, velocity, accent });
   scheduler.changedNow(n);
 }
 
 // Probability %, Mutation 0–127, Seed: from the next Cycle
 function evolve(n, probability, mutation, seed) {
-  Object.assign(params[n], { probability, mutation, seed });
+  engine.setLane(n, { probability, mutation, seed });
   refresh(n);
 }
 
 // Capture: the Cycle sounding now becomes the Lane's Base (heard from the next Cycle)
 function capture(n) {
-  engine.configure({ lanes: params, ...song });
   engine.capture(n, scheduler.captureCycle(n));
   storeBases();
+  storeFrozen(); // a frozen Lane now holds the new Base
   refresh(n);
 }
 
@@ -114,7 +106,7 @@ let storedBases = "";
 function storeBases() {
   const data = engine.saveBases();
   storedBases = data.join(" ");
-  outlet(7, data);
+  outlet(OUT.bases, data);
 }
 
 // the pattr's saved value, when the set (or a preset) loads — and its echo of what we just stored
@@ -128,14 +120,13 @@ function bases(...data) {
 // Voicing Matrix button (lane 0..3, voice 1..4, state 0/1): lands on the next bar while playing, at once while
 // stopped. A Voice belongs to one Lane at most, so switching it on may switch another Lane's button off.
 function voice(n, v, state) {
-  const before = [0, 1, 2, 3].map((m) => engine.laneVoices(m).slice());
+  const before = Array.from({ length: LANES }, (_, m) => engine.laneVoices(m).slice());
   if (!engine.setVoice(Number(n), Number(v), Boolean(Number(state)), scheduler.changePosition())) return;
   for (let m = 0; m < LANES; m++)
-    for (let w = 1; w <= 4; w++) {
+    for (let w = 1; w <= VOICES; w++) {
       const on = engine.laneVoices(m).includes(w);
-      if (m !== Number(n) && on !== before[m].includes(w)) outlet(12, "script", "send", `btn_L${m + 1}_V${w}`, on ? 1 : 0);
+      if (m !== Number(n) && on !== before[m].includes(w)) outlet(OUT.script, "script", "send", controlName("voiceButton", m + 1, w), on ? 1 : 0);
     }
-  engine.configure({ lanes: params, ...song });
   for (let m = 0; m < LANES; m++) scheduler.changedNow(m);
   showLaneVoices();
   updateMatrixActiveStates();
@@ -144,27 +135,24 @@ function voice(n, v, state) {
 function updateMatrixActiveStates() {
   for (let n = 0; n < LANES; n++) {
     const count = engine.laneVoices(n).length;
-    const mode = params[n].groupMode || "poly";
+    const mode = engine.laneSettings(n).groupMode || "poly";
     const gmActive = count > 0 ? 1 : 0;
     const chordActive = (count > 0 && mode === "poly") ? 1 : 0;
 
-    const gmName = `menu_L${n + 1}_gm`;
-    const chordName = `menu_L${n + 1}_chord`;
+    const gmName = controlName("groupMode", n + 1);
+    const chordName = controlName("chordShape", n + 1);
+    // Rhythm view: grey out (active 0) if the Lane has no Voices, but keep it clickable (no ignoreclick)
+    const rhythm = ["hits", "length", "rotate", "rate", "rhythm"].map((kind) => controlName(kind, n + 1));
 
     // Send active state to object inlet (visual dimming)
-    outlet(12, "script", "send", gmName, "active", gmActive);
-    outlet(12, "script", "send", chordName, "active", chordActive);
+    outlet(OUT.script, "script", "send", gmName, "active", gmActive);
+    outlet(OUT.script, "script", "send", chordName, "active", chordActive);
 
     // Send ignoreclick attribute to box (strictly disables mouse clicks)
-    outlet(12, "script", "sendbox", gmName, "ignoreclick", gmActive ? 0 : 1);
-    outlet(12, "script", "sendbox", chordName, "ignoreclick", chordActive ? 0 : 1);
+    outlet(OUT.script, "script", "sendbox", gmName, "ignoreclick", gmActive ? 0 : 1);
+    outlet(OUT.script, "script", "sendbox", chordName, "ignoreclick", chordActive ? 0 : 1);
 
-    // Rhythm view: grey out (active 0) if count === 0, but keep clickable (no ignoreclick)
-    outlet(12, "script", "send", `dial_L${n + 1}_hits`, "active", gmActive);
-    outlet(12, "script", "send", `dial_L${n + 1}_len`, "active", gmActive);
-    outlet(12, "script", "send", `dial_L${n + 1}_rot`, "active", gmActive);
-    outlet(12, "script", "send", `dial_L${n + 1}_rate`, "active", gmActive);
-    outlet(12, "script", "send", `menu_L${n + 1}_rhythm`, "active", gmActive);
+    for (const name of rhythm) outlet(OUT.script, "script", "send", name, "active", gmActive);
 
     // Direct JS patcher access if available
     if (typeof this !== "undefined" && this.patcher && this.patcher.getnamed) {
@@ -178,7 +166,7 @@ function updateMatrixActiveStates() {
         chordObj.ignoreclick = chordActive ? 0 : 1;
         if (chordObj.message) chordObj.message("active", chordActive);
       }
-      for (const name of [`dial_L${n + 1}_hits`, `dial_L${n + 1}_len`, `dial_L${n + 1}_rot`, `dial_L${n + 1}_rate`, `menu_L${n + 1}_rhythm`]) {
+      for (const name of rhythm) {
         const obj = this.patcher.getnamed(name);
         if (obj && obj.message) obj.message("active", gmActive);
       }
@@ -186,9 +174,84 @@ function updateMatrixActiveStates() {
   }
 }
 
+// Freeze toggle: hold the Cycle sounding now (heard from the next Cycle), leaving Mutation as it is; off: evolve again
+// from the song position. Which Cycle each Lane holds is saved with the set (stored-only pattr), so a set reopened
+// while frozen holds the same one. Live restores the toggle and the pattr in either order: a stored value not yet
+// taken up waits for the toggle.
+const freezeOn = Array.from({ length: LANES }, () => false);
+const restoredFreeze = Array.from({ length: LANES }, () => FREEZE_OFF);
+let storedFrozen = "";
+const fromStored = (value) => (value === FREEZE_BASE ? "base" : value >= 0 ? value : undefined);
+function freeze(n, on) {
+  freezeOn[n] = Boolean(Number(on));
+  const restored = restoredFreeze[n];
+  restoredFreeze[n] = FREEZE_OFF;
+  const held = !freezeOn[n] ? undefined : restored !== FREEZE_OFF ? fromStored(restored) : scheduler.captureCycle(n);
+  engine.setLane(n, { freeze: held });
+  storeFrozen();
+  refresh(n);
+}
+
+function storeFrozen() {
+  const data = Array.from({ length: LANES }, (_, n) => {
+    const held = engine.laneSettings(n).freeze;
+    return held === undefined ? FREEZE_OFF : held === "base" ? FREEZE_BASE : held;
+  });
+  storedFrozen = data.join(" ");
+  outlet(OUT.frozen, data);
+}
+
+// the pattr's saved value, when the set (or a preset) loads — and its echo of what we just stored
+function frozen(...data) {
+  if (data.join(" ") === storedFrozen) return;
+  storedFrozen = data.join(" ");
+  data.slice(0, LANES).forEach((value, n) => {
+    if (!freezeOn[n]) return void (restoredFreeze[n] = value);
+    engine.setLane(n, { freeze: fromStored(value) ?? scheduler.captureCycle(n) });
+    refresh(n);
+  });
+}
+
+// Randomise: new values for one of a Lane's groups ("rhythm", "pitch" or "evolution"), or all three ("lane"); Lane -1
+// = every Lane. The values are set on the controls themselves, so they're saved with the set, show in automation and
+// reach the engine as a turn of the knobs would. Undo puts back the controls from before the Lane's last roll.
+const beforeRoll = Array.from({ length: LANES }, () => null);
+function randomise(n, group) {
+  if (n < 0) {
+    for (let m = 0; m < LANES; m++) randomise(m, "lane");
+    return;
+  }
+  const current = engine.laneSettings(n);
+  const next = randomSettings(current, group === "lane" ? RANDOM_GROUPS : [group], Math.random);
+  beforeRoll[n] = Object.fromEntries(Object.keys(next).map((key) => [key, current[key]]));
+  setControls(n, next);
+}
+
+function undo(n) {
+  const back = beforeRoll[n];
+  beforeRoll[n] = null;
+  if (back) setControls(n, back);
+}
+
+function setControls(n, settings) {
+  const send = (control, ...values) => outlet(OUT.controls, n, control, ...values);
+  const { length, hits, rotate, rate, pitchCycle, probability, mutation, seed } = settings;
+  if (length !== undefined) send("length", length); // before Hits, whose range follows Length
+  if (hits !== undefined) send("hits", hits);
+  if (rotate !== undefined) send("rotate", rotate);
+  if (RATES.includes(rate)) send("rate", RATES.indexOf(rate));
+  if (pitchCycle) {
+    pitchCycle.slice(0, PITCH_STEPS).forEach((degree, i) => send("degree", i, degree));
+    send("pitchLength", Math.min(pitchCycle.length, PITCH_STEPS));
+  }
+  if (probability !== undefined) send("probability", probability);
+  if (mutation !== undefined) send("mutation", mutation);
+  if (seed !== undefined) send("seed", seed);
+}
+
 // Group Mode and Chord Shape (menu indices): from the Lane's next Cycle
 function group(n, modeIndex, shapeIndex) {
-  Object.assign(params[n], { groupMode: GROUP_MODES[modeIndex], chordShape: Object.keys(CHORD_SHAPES)[shapeIndex] });
+  engine.setLane(n, { groupMode: GROUP_MODES[modeIndex], chordShape: Object.keys(CHORD_SHAPES)[shapeIndex] });
   refresh(n);
   showLaneVoices();
   updateMatrixActiveStates();
@@ -197,14 +260,14 @@ function group(n, modeIndex, shapeIndex) {
 function showLaneVoices() {
   for (let n = 0; n < LANES; n++) {
     const voices = engine.laneVoices(n);
-    const mode = voices.length > 1 ? ` ${params[n].groupMode || "poly"}` : "";
+    const mode = voices.length > 1 ? ` ${engine.laneSettings(n).groupMode || "poly"}` : "";
     const text = !voices.length ? "off" : voices.length === 1 ? `V${voices[0]}` : `V${voices.join("+")}${mode}`;
-    outlet(11, n, "set", text);
+    outlet(OUT.laneVoices, n, "set", text);
   }
 }
 
 function transpose(n, degrees, octaves) {
-  Object.assign(params[n], { transpose: degrees, octave: octaves });
+  engine.setLane(n, { transpose: degrees, octave: octaves });
   refresh(n);
 }
 
@@ -241,32 +304,31 @@ const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", 
 function setScale(scale, change) {
   Object.assign(scale, change);
   if (!scale.intervals.length) return;
-  song.scale = { root: scale.root, intervals: scale.intervals };
-  outlet(6, "set", `Scale: ${NOTE_NAMES[scale.root]} ${scale.name}`);
+  engine.setSong({ scale: { root: scale.root, intervals: scale.intervals } });
+  outlet(OUT.scale, "set", `Scale: ${NOTE_NAMES[scale.root]} ${scale.name}`);
   for (let n = 0; n < LANES; n++) refresh(n);
 }
 
 function transportRunning(isPlaying) {
-  outlet(5, isPlaying ? 1 : 0);
+  outlet(OUT.transport, isPlaying ? 1 : 0);
   scheduler.transport(Boolean(isPlaying));
 }
 
 function reset(bars) {
-  song.resetBars = bars;
+  engine.setSong({ resetBars: bars });
   sendReset();
   for (let n = 0; n < LANES; n++) refresh(n); // the Pitch Cycle realigns at each Reset
 }
 
 // Live's time signature, e.g. 7 8
 function timesig(numerator, denominator) {
-  song.ticksPerBar = (numerator * 1920) / denominator;
+  engine.setSong({ ticksPerBar: (numerator * 1920) / denominator });
   sendReset();
   for (let n = 0; n < LANES; n++) refresh(n);
 }
 
 function sendReset() {
-  engine.configure({ lanes: params, ...song });
-  outlet(3, song.resetBars ? song.resetBars * song.ticksPerBar : NEVER);
+  outlet(OUT.resetPeriod, engine.resetTicks() || PLAYER.noReset);
 }
 
 // the player took up a pending bank (already noted in the dict) at a Cycle boundary
@@ -276,7 +338,6 @@ function adopt(n, bank, songTicks) {
 
 // a change reaches the Lane from its next Cycle (or at once while stopped)
 function refresh(n) {
-  engine.configure({ lanes: params, ...song });
   scheduler.changed(n);
 }
 
@@ -292,7 +353,6 @@ function bye(deviceId) {
 
 function bang() {
   player.clear(); // a fresh player isn't playing any bank yet
-  engine.configure({ lanes: params, ...song });
   scheduler.start();
   sendReset();
   showVoices();
@@ -306,22 +366,22 @@ function where(songTicks) {
   scheduler.poll(songTicks);
   for (let n = 0; n < LANES; n++) {
     const { cycleIndex, step, rows, mutated, captureDepth } = engine.laneView(n, songTicks);
-    const length = params[n].length;
-    outlet(4, n, "set", `Cycle ${cycleIndex + 1} · step ${step + 1}/${length}${mutated ? " · mutated" : ""}`);
-    outlet(4, LANES + n, "set", captureDepth ? `captured${captureDepth > 1 ? ` ×${captureDepth}` : ""}` : "Euclidean");
+    const { length } = engine.laneSettings(n);
+    outlet(OUT.readouts, n, "set", `Cycle ${cycleIndex + 1} · step ${step + 1}/${length}${mutated ? " · mutated" : ""}`);
+    outlet(OUT.readouts, LANES + n, "set", captureDepth ? `captured${captureDepth > 1 ? ` ×${captureDepth}` : ""}` : "Euclidean");
     // pattern view: ● hit, · rest; the playhead step (◉ hit, ○ rest) goes on an overlay in its own colour, and the
     // pattern leaves a gap under it. No-break spaces pad both, so Max keeps leading blanks and the columns line up
     const gap = "\u00a0";
     const draw = (glyph) =>
       rows.map((row, r) => row.map((hit, i) => glyph(hit, r * rows[0].length + i === step)).join(gap)).join("\n");
-    outlet(8, n, "set", draw((hit, playhead) => (playhead ? gap : hit ? "●" : "·")));
-    outlet(8, LANES + n, "set", draw((hit, playhead) => (playhead ? (hit ? "◉" : "○") : gap)));
+    outlet(OUT.patterns, n, "set", draw((hit, playhead) => (playhead ? gap : hit ? "●" : "·")));
+    outlet(OUT.patterns, LANES + n, "set", draw((hit, playhead) => (playhead ? (hit ? "◉" : "○") : gap)));
   }
 }
 
 function showVoices() {
   const { connected, duplicates } = engine.voiceStatus();
-  const missing = [1, 2, 3, 4].filter((voice) => !connected.includes(voice));
+  const missing = Array.from({ length: VOICES }, (_, v) => v + 1).filter((voice) => !connected.includes(voice));
   let text = "";
   if (!connected.length) {
     text = "Waiting for Voices";
@@ -329,5 +389,5 @@ function showVoices() {
     text = missing.length ? `Missing Voice ${missing.join(" ")}` : "";
     if (duplicates.length) text += `${text ? " · " : ""}Duplicate Voice ${duplicates.join(" ")}`;
   }
-  outlet(2, "set", text);
+  outlet(OUT.voiceStatus, "set", text);
 }

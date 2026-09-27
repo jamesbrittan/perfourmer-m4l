@@ -1,53 +1,37 @@
 import { uniformInt } from "pure-rand/distribution/uniformInt";
 import { xoroshiro128plus } from "pure-rand/generator/xoroshiro128plus";
 
-export { createScheduler, type PlayerCommand } from "./scheduler";
+import { inRange } from "./device";
 
-/** Named, known-good Euclidean rhythms a Lane can load as its Base. */
-export const RHYTHM_PRESETS: readonly {
-  readonly name: string;
-  readonly hits: number;
-  readonly length: number;
-  readonly rotate: number;
-}[] = [
-  // Electronic / Genre rhythms
-  { name: "Four-on-the-floor 4/16", hits: 4, length: 16, rotate: 0 },
-  { name: "Offbeat 4/16", hits: 4, length: 16, rotate: 2 },
-  { name: "Straight 16ths 16/16", hits: 16, length: 16, rotate: 0 },
-  { name: "Syncopated 5/16", hits: 5, length: 16, rotate: 0 },
-  { name: "3-against-4 3/16", hits: 3, length: 16, rotate: 0 },
-  { name: "Phase 12 8/12", hits: 8, length: 12, rotate: 0 },
-  { name: "Phase 13 8/13", hits: 8, length: 13, rotate: 0 },
-  // Traditional Euclidean rhythms (Toussaint 2005)
-  ...([
-    ["Khafif-e-ramal", 2, 5],
-    ["Cumbia", 3, 4],
-    ["Romanian folk", 3, 5],
-    ["Ruchenitza", 3, 7],
-    ["Tresillo", 3, 8],
-    ["Ruchenitza", 4, 7],
-    ["Aksak", 4, 9],
-    ["Outside Now", 4, 11],
-    ["York-Samai", 5, 6],
-    ["Nawakhat", 5, 7],
-    ["Cinquillo", 5, 8],
-    ["Agsag-Samai", 5, 9],
-    ["Moussorgsky", 5, 11],
-    ["Venda", 5, 12],
-    ["Bossa nova", 5, 16],
-    ["Tuareg", 7, 8],
-    ["West African bell", 7, 12],
-    ["Samba", 7, 16],
-    ["Central African", 9, 16],
-    ["Aka", 11, 24],
-    ["Aka upper sangha", 13, 24],
-  ] as const).map(([name, hits, length]) => ({
-    name: `${name} ${hits}/${length}`,
-    hits,
-    length,
-    rotate: 0,
-  })),
-];
+export { createScheduler, type PlayerCommand } from "./scheduler";
+export * from "./device";
+
+/** Named, known-good Euclidean rhythms a Lane can load as its Base: a short library for electronic and minimalist
+ * music, each name showing its hits/length (many from Toussaint 2005). */
+export const RHYTHM_PRESETS: readonly { readonly name: string; readonly hits: number; readonly length: number; readonly rotate: number }[] = (
+  [
+    // Grid and metric anchors
+    ["Four-on-floor", 4, 16, 0],
+    ["Offbeat", 4, 16, 2],
+    ["Ostinato", 16, 16, 0],
+    // 16-step syncopations and club grooves
+    ["Dotted 8th", 5, 16, 0],
+    ["3-against-4", 3, 16, 0],
+    ["Samba", 7, 16, 0],
+    ["Central African", 9, 16, 0],
+    // 8-step claves and timelines
+    ["Tresillo", 3, 8, 0],
+    ["Cinquillo", 5, 8, 0],
+    ["Tuareg", 7, 8, 0],
+    // Minimalist and polymetric phasing
+    ["Detroit", 2, 5, 0],
+    ["Ostinato", 3, 5, 0],
+    ["Phasing", 3, 7, 0],
+    ["Outside Now", 4, 11, 0],
+    ["Bell", 7, 12, 0],
+    ["Phase Pair", 8, 13, 0],
+  ] as const
+).map(([name, hits, length, rotate]) => ({ name: `${name} ${hits}/${length}`, hits, length, rotate }));
 
 export type Event = { onset: number; duration: number; pitch: number; velocity: number; voice: number };
 /** Step length in ticks at 480 PPQ, slowest first. Q = quintuplet, T = triplet, S = septuplet. */
@@ -73,7 +57,9 @@ export const RATES = Object.keys(RATE_TICKS) as Rate[];
  * to 100% the note stretches from half a step to the whole gap to the next hit, and at 100% it ties into the next.
  * accent: velocity added to the first hit of each Cycle (0 = none).
  * probability: % chance each hit sounds; mutation: 0 (the Base every Cycle) to 127 (a new pattern every Cycle);
- * seed: picks the path Mutation and probability take. */
+ * seed: picks the path Mutation and probability take.
+ * freeze: hold one Cycle, repeating it exactly (its Mutation and probability draws included) whatever Cycle is due;
+ * "base" holds the Base without Mutation or probability (a Capture while frozen makes the frozen Cycle the Base). */
 export type LaneParams = {
   hits: number;
   length: number;
@@ -90,6 +76,7 @@ export type LaneParams = {
   gate?: number;
   velocity?: number;
   accent?: number;
+  freeze?: number | "base";
 };
 /** Live's global scale: root 0–11 (C = 0) and the semitone intervals of its notes. */
 export type Scale = { root: number; intervals: number[] };
@@ -198,6 +185,7 @@ export function createEngine() {
   // and any still sounding there end there. `from` is the current layout once the change is retired.
   let layoutChange: { from: VoiceLayout; at: number } = { from: voiceLayout, at: 0 };
   let ticksPerBar = 1920;
+  let resetBars = 0;
   let resetTicks = 0; // 0 = Lanes never realign
   let basesChanged = 0; // counts changes to the Captured Bases, so a cached Lane view knows it's out of date
   const views = new Map<number, { key: string; view: Omit<LaneView, "step"> }>();
@@ -211,7 +199,10 @@ export function createEngine() {
    * fixed number per step, so a Cycle is reproducible from song position whatever the other settings.
    */
   function cycleHits(lane: number, cycleIndex: number, evolve = true): { onset: number; degree: number; count: number }[] {
-    const { hits, length, rotate, pitchCycle = [0], seed = 0 } = lanes[lane];
+    const { hits, length, rotate, pitchCycle = [0], seed = 0, freeze } = lanes[lane];
+    if (freeze === "base") evolve = false;
+    const end = playedTicks(lane, cycleIndex);
+    if (typeof freeze === "number") cycleIndex = freeze; // a frozen Lane draws, and counts hits, as in its held Cycle
     const { mutation, probability } = evolve ? { mutation: 0, probability: 100, ...lanes[lane] } : { mutation: 0, probability: 100 };
     const stack = active(lane)?.stack;
     const captured = stack?.[stack.length - 1];
@@ -227,7 +218,6 @@ export function createEngine() {
     let hitIndex = cyclesSinceReset(lane, cycleIndex) * baseHits; // the Pitch Cycle realigns at each Reset
     let count = cyclesSinceReset(lane, cycleIndex) * baseHits; // hits since the Reset, for round-robin
     const step = stepTicks(lane);
-    const end = playedTicks(lane, cycleIndex);
     const sounding: { onset: number; degree: number; count: number }[] = [];
     base.forEach((isHit, i) => {
       const [stepDraw, hitDraw, pitchDraw, degreeDraw, soundDraw] = [chance(), chance(), chance(), chance(), chance()];
@@ -395,19 +385,48 @@ export function createEngine() {
     return [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes }));
   }
 
+  /** A Captured Base waits (after loading a set) until its Lane's controls match the ones it was captured with, and
+   * gives way to the controls when they change from those. */
+  function settingsChanged() {
+    for (const [lane, entry] of captures) {
+      const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
+      if (matches && entry.waiting) entry.waiting = false;
+      else if (!matches && !entry.waiting) captures.delete(lane);
+      else continue;
+      basesChanged++;
+    }
+  }
+
   return {
+    /** Replace every setting: the Lanes, and the song settings (anything left out takes its default). Lane
+     * settings are brought inside the control ranges (RANGES), here and in setLane. */
     configure(config: EngineConfig) {
-      lanes = config.lanes;
-      for (const [lane, entry] of captures) {
-        const matches = !!lanes[lane] && signature(lanes[lane]).join() === entry.signature.join();
-        if (matches && entry.waiting) entry.waiting = false;
-        else if (!matches && !entry.waiting) captures.delete(lane);
-        else continue;
-        basesChanged++;
-      }
+      lanes = config.lanes.map((lane) => inRange(lane) as LaneParams);
       scale = config.scale ?? C_MAJOR;
       ticksPerBar = config.ticksPerBar ?? 1920;
       resetTicks = (config.resetBars ?? 0) * ticksPerBar;
+      resetBars = config.resetBars ?? 0;
+      settingsChanged();
+    },
+    /** Change some of a Lane's settings, keeping the rest. */
+    setLane(lane: number, change: Partial<LaneParams>) {
+      lanes[lane] = { ...lanes[lane], ...inRange(change) };
+      settingsChanged();
+    },
+    /** Change some of the song settings, keeping the rest. */
+    setSong(change: Omit<EngineConfig, "lanes">) {
+      if (change.scale) scale = change.scale;
+      if (change.ticksPerBar !== undefined) ticksPerBar = change.ticksPerBar;
+      if (change.resetBars !== undefined) resetBars = change.resetBars;
+      resetTicks = resetBars * ticksPerBar;
+    },
+    /** The song settings as they stand. */
+    songSettings(): Required<Omit<EngineConfig, "lanes">> {
+      return { scale, resetBars, ticksPerBar };
+    },
+    /** A Lane's settings as they stand (a copy). */
+    laneSettings(lane: number): Readonly<LaneParams> {
+      return { ...lanes[lane] };
     },
     cycleTicks,
     /** The Reset period in ticks (0 = no Reset). */
@@ -476,6 +495,8 @@ export function createEngine() {
       const entry = active(lane) ?? { signature: signature(lanes[lane]), stack: [] };
       entry.stack.push({ steps, degrees });
       captures.set(lane, entry);
+      // a frozen Lane holds on to what it was playing: the new Base, unmutated
+      if (lanes[lane].freeze !== undefined) lanes[lane] = { ...lanes[lane], freeze: "base" };
       basesChanged++;
     },
     /** Go back to the Base from before the last Capture. */
@@ -515,8 +536,7 @@ export function createEngine() {
         }
         captures.set(lane, { signature: taken, stack, waiting: true });
       }
-      for (const [lane, entry] of captures)
-        if (lanes[lane] && signature(lanes[lane]).join() === entry.signature.join()) entry.waiting = false;
+      settingsChanged(); // the controls may already match
     },
     voiceJoined(deviceId: number, voice: number) {
       voiceDevices.set(deviceId, voice);

@@ -7,7 +7,7 @@ const gap = (gate: number) => (c: Controls) => [0, 1, 2, 3].forEach((n) => c.art
 
 /** Notes a Lane still holds at `tick` that began long enough ago to be hanging (tied notes may rightly last). */
 function hanging(sim: ReturnType<typeof simulate>, tick: number) {
-  return sim.state.params.flatMap((p, n) =>
+  return sim.lanes().flatMap((p, n) =>
     (p.gate ?? 50) >= 100
       ? []
       : [...sim.heldAt(n, tick)].filter(([, since]) => tick - since > 2 * sim.engine.cycleTicks(n) + 2 * BAR),
@@ -83,7 +83,7 @@ describe("The player, fed by the scheduler", () => {
     it("while playing takes the Cycle sounding, which then repeats at Mutation 0", () => {
       const sim = simulate({
         play: [{ start: 0, ticks: CYCLE * 20 }],
-        setup: (c) => c.lane(0, { mutation: 127 }),
+        setup: (c) => c.lane(0, { hits: 5, length: 8, rate: "1/16", mutation: 127 }),
         edits: [
           { at: CYCLE * 10 + 400, fn: (c) => c.capture(0) },
           { at: CYCLE * 11 + 400, fn: (c) => c.lane(0, { mutation: 0 }) },
@@ -101,12 +101,32 @@ describe("The player, fed by the scheduler", () => {
           { start: CYCLE * 6 + 300, ticks: 2, stopped: (c) => (c.capture(0), c.lane(0, { mutation: 0 })) },
           { start: CYCLE * 12, ticks: CYCLE * 4 },
         ],
-        setup: (c) => c.lane(0, { mutation: 127 }),
+        setup: (c) => c.lane(0, { hits: 5, length: 8, rate: "1/16", mutation: 127 }),
       });
       const captured = heard(sim, 6);
       expect(captured.length).toBeGreaterThan(0);
       for (const c of [12, 13, 15]) expect(heard(sim, c)).toEqual(captured);
     });
+  });
+});
+
+describe("Freeze while playing", () => {
+  it("repeats the Cycle sounding when pressed, then evolves again when released, without leaving notes hanging", () => {
+    const CYCLE = 960;
+    const sim = simulate({
+      play: [{ start: 0, ticks: CYCLE * 24 }],
+      setup: (c) => (c.lane(0, { hits: 5, length: 8, rate: "1/16", mutation: 127, probability: 80 }), gap(100)(c)),
+      edits: [
+        { at: CYCLE * 6 + 300, fn: (c) => c.freeze(0, true) },
+        { at: CYCLE * 14 + 300, fn: (c) => c.freeze(0, false) },
+      ],
+    });
+    const cycle = (c: number) =>
+      sim.stream[0].filter(([t, , v]) => v > 0 && t >= CYCLE * c && t < CYCLE * (c + 1)).map(([t, id, v]) => [t % CYCLE, id, v]);
+    for (const c of [7, 9, 13]) expect(cycle(c)).toEqual(cycle(6));
+    expect([16, 17, 18].some((c) => JSON.stringify(cycle(c)) !== JSON.stringify(cycle(6)))).toBe(true);
+    expect(between(sim, CYCLE * 16, CYCLE * 24 - 480)).toEqual(expected(sim, CYCLE * 16, CYCLE * 24 - 480));
+    expect(sim.clobbers).toBe(0);
   });
 });
 
