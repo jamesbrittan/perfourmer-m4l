@@ -11,6 +11,7 @@ const {
   controlName,
   RATES,
   RHYTHM_PRESETS,
+  PITCH_PRESETS,
   GROUP_MODES,
   CHORD_SHAPES,
   HUB_OUTLETS: OUT,
@@ -69,8 +70,31 @@ function rhythm(n, index) {
   loadingPreset = false;
 }
 
+// Pitch Preset menu (0 = none): set the Lane's Pitch Length and degrees to the preset. Changing length
+// or any degree from the preset drops back to "—".
+const chosenPitchPreset = [0, 0, 0, 0];
+let loadingPitchPreset = false;
+
+function pitchPreset(n, index) {
+  chosenPitchPreset[n] = index;
+  const preset = PITCH_PRESETS[index - 1];
+  if (!preset) return;
+  loadingPitchPreset = true;
+  const degs = Array.from({ length: 8 }, (_, i) => (i < preset.degrees.length ? preset.degrees[i] : 0));
+  outlet(OUT.pitchPresetBoxes, n, preset.degrees.length, ...degs);
+  loadingPitchPreset = false;
+}
+
 // Pitch Cycle editor: its length, then all 8 degree boxes (only the first <length> are used)
 function pitch(n, length, ...degrees) {
+  const chosen = PITCH_PRESETS[chosenPitchPreset[n] - 1];
+  if (chosen && !loadingPitchPreset) {
+    const matches = chosen.degrees.length === length && chosen.degrees.every((d, i) => d === degrees[i]);
+    if (!matches) {
+      chosenPitchPreset[n] = 0;
+      outlet(OUT.pitchPresetMenus, n, "set", 0);
+    }
+  }
   engine.setLane(n, { pitchCycle: degrees.slice(0, length) });
   refresh(n);
 }
