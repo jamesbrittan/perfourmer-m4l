@@ -218,7 +218,7 @@ function xoroshiro128plus(seed) {
 var LANES = 4;
 var VOICES = 4;
 var PITCH_STEPS = 8;
-var PLAYER = { gridTicks: 2, bankSize: 1e4, noReset: 1e12, dict: "pf4.player" };
+var PLAYER = { gridTicks: 2, bankSize: 1e5, noReset: 1e12, dict: "pf4.player" };
 var PLAYER_POSITION = "fmod(fmod($f1,$f3),$f2)";
 var RANGES = {
   hits: [0, 32],
