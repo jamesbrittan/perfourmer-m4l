@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEngine, PLAYER_POSITION, type Rate } from "../src/index";
+import { createEngine, FEELS, PLAYER, PLAYER_POSITION, RANGES, STRAIGHT_RATES, type Rate } from "../src/index";
 
 /** Evaluates the player's Max expr the way Max does ($fN = the Nth inlet as a float, fmod as in C). */
 const player = (songTicks: number, cycleTicks: number, resetTicks: number) =>
@@ -19,5 +19,18 @@ describe("The player's position formula", () => {
       for (let tick = 0; tick < 1920 * 13; tick += 38)
         expect(player(tick, engine.cycleTicks(0), reset)).toBeCloseTo(engine.locate(0, tick).offsetTicks, 6);
     }
+  });
+});
+
+describe("The player's table", () => {
+  it("has room in each bank for the longest Cycle: every step at the slowest Rate and Feel", () => {
+    const engine = createEngine();
+    const cycles = STRAIGHT_RATES.flatMap((rate) =>
+      FEELS.map((feel) => {
+        engine.configure({ lanes: [{ hits: 1, length: RANGES.length[1], rotate: 0, rate, feel }] });
+        return engine.cycleTicks(0);
+      }),
+    );
+    expect(Math.ceil(Math.max(...cycles) / PLAYER.gridTicks)).toBeLessThan(PLAYER.bankSize);
   });
 });

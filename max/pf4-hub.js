@@ -9,7 +9,8 @@ const {
   createEngine,
   createScheduler,
   controlName,
-  RATES,
+  STRAIGHT_RATES,
+  FEELS,
   RHYTHM_PRESETS,
   GROUP_MODES,
   CHORD_SHAPES,
@@ -43,8 +44,9 @@ const scheduler = createScheduler({
   },
 });
 
-function lane(n, hits, length, rotate, rateIndex) {
-  engine.setLane(n, { hits, length, rotate, rate: RATES[rateIndex] });
+// Hits, Length, Rotate, Rate (a straight value) and Feel (menu indices for the last two): from the next Cycle
+function lane(n, hits, length, rotate, rateIndex, feelIndex) {
+  engine.setLane(n, { hits, length, rotate, rate: STRAIGHT_RATES[rateIndex], feel: FEELS[feelIndex] });
   const preset = RHYTHM_PRESETS[chosenPreset[n] - 1];
   if (preset && !loadingPreset && (preset.hits !== hits || preset.length !== length || preset.rotate !== rotate)) {
     chosenPreset[n] = 0;
@@ -139,7 +141,7 @@ function updateMatrixActiveStates() {
     const gmName = controlName("groupMode", n + 1);
     const chordName = controlName("chordShape", n + 1);
     // Rhythm view: grey out (active 0) if the Lane has no Voices, but keep it clickable (no ignoreclick)
-    const rhythm = ["hits", "length", "rotate", "rate", "rhythm"].map((kind) => controlName(kind, n + 1));
+    const rhythm = ["hits", "length", "rotate", "rate", "feel", "rhythm"].map((kind) => controlName(kind, n + 1));
 
     // Send active state to object inlet (visual dimming)
     outlet(OUT.script, "script", "send", gmName, "active", gmActive);

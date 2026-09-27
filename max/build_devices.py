@@ -46,8 +46,10 @@ HELP = {
     "Length": ("Length", "How many steps the Lane's Cycle has (1–32). The rhythm repeats every Cycle. "
                "Takes effect from the next Cycle."),
     "Rotate": ("Rotate", "Shifts the hits later by this many steps. Takes effect from the next Cycle."),
-    "Rate": ("Rate", "How long each step lasts: 1/1 to 1/32, with triplets (T), quintuplets (Q) and septuplets (S). "
-             "Takes effect from the next Cycle."),
+    "Rate": ("Rate", "How long each step lasts, as a straight value from 1/1 to 1/32; the Feel beneath it stretches "
+             "or shrinks it. Takes effect from the next Cycle."),
+    "Feel": ("Feel", "Stretches or shrinks the Rate's step: straight, dotted (×1.5), triplet (3 in the time of 2), "
+             "quintuplet (5 in 4) or septuplet (7 in 4). Takes effect from the next Cycle."),
     "Rhythm": ("Rhythm Preset", "Loads a known Euclidean rhythm (Toussaint): sets Hits, Length and Rotate, making it "
                "the Lane's Base. Shows — again once you change those by hand."),
     "Pitch Length": ("Pitch Cycle notes", "How many of the 8 degree boxes the Pitch Cycle uses. Each hit takes the "
@@ -243,7 +245,7 @@ def from_engine(expression):
 SHARED = from_engine("{LANES: engine.LANES, VOICES: engine.VOICES, PITCH_STEPS: engine.PITCH_STEPS, "
                      "PLAYER: engine.PLAYER, PLAYER_POSITION: engine.PLAYER_POSITION, RANGES: engine.RANGES, "
                      "LANE_DEFAULTS: engine.LANE_DEFAULTS, OUT: engine.HUB_OUTLETS, NAMES: engine.CONTROL_NAMES, "
-                     "RATES: engine.RATES}")
+                     "RATES: engine.STRAIGHT_RATES, FEELS: engine.FEELS}")
 LANES, VOICES, PITCH_STEPS = SHARED["LANES"], SHARED["VOICES"], SHARED["PITCH_STEPS"]
 GRID_TICKS = SHARED["PLAYER"]["gridTicks"]  # player resolution
 BANK_SIZE = SHARED["PLAYER"]["bankSize"]  # table key = (lane * 2 + bank) * BANK_SIZE + slot
@@ -252,7 +254,9 @@ PLAYER_DICT = SHARED["PLAYER"]["dict"]  # each Lane's playing bank, read by the 
 RANGES = SHARED["RANGES"]
 DEFAULTS = SHARED["LANE_DEFAULTS"]  # each Lane's settings in a new Hub
 OUT = SHARED["OUT"]  # the Hub script's outlets
-RATES = SHARED["RATES"]
+RATES = SHARED["RATES"]  # the Rate control's straight values
+FEELS = SHARED["FEELS"]
+FEEL_LABELS = {"straight": "str.", "dotted": "dot.", "triplet": "trip.", "quintuplet": "quint.", "septuplet": "sept."}
 LFO_DEFAULTS = [(7, 5), (11, 9), (13, 15), (17, 19)]  # per Lane: (AT rate, CC1 rate) in bars; depths default to 0 (off)
 LFO_UPDATE_MS = 40  # LFO sampling; only changed values are sent, so the MIDI port isn't flooded
 
@@ -406,6 +410,7 @@ def build_hub():
     for n in range(LANES):
         d = DEFAULTS[n]
         hits_d, len_d, rot_d, rate_d = d["hits"], d["length"], d["rotate"], RATES.index(d["rate"])
+        feel_d = FEELS.index(d["feel"])
         R = RANGES
         row_y = 52 + 28 * n
         ry = row_y   # row Y in permanent left section
@@ -430,16 +435,18 @@ def build_hub():
         # --- Tab 0: Rhythm (4 columns side-by-side, 90px each)
         rx = 285 + 90 * n
         P.comment(f"Lane {n + 1}", rx, 26, 60, tab=0)
-        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, *R["hits"], hits_d, short="Hits", tab=0,
+        hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, *R["hits"], hits_d, h=40, short="Hits", tab=0,
                        varname=name("hits", n + 1))
-        length = P.param("live.dial", f"L{n + 1} Length", rx + 44, 42, *R["length"], len_d, short="Length", tab=0,
-                         varname=name("length", n + 1))
-        rotate = P.param("live.dial", f"L{n + 1} Rotate", rx, 92, *R["rotate"], rot_d, short="Rotate", tab=0,
+        length = P.param("live.dial", f"L{n + 1} Length", rx + 44, 42, *R["length"], len_d, h=40, short="Length",
+                         tab=0, varname=name("length", n + 1))
+        rotate = P.param("live.dial", f"L{n + 1} Rotate", rx, 96, *R["rotate"], rot_d, h=40, short="Rotate", tab=0,
                          varname=name("rotate", n + 1))
-        rate = P.param("live.dial", f"L{n + 1} Rate", rx + 44, 92, 0, 0, rate_d, short="Rate", enum=RATES, tab=0,
-                       varname=name("rate", n + 1))
-        menu = P.param("live.menu", f"L{n + 1} Rhythm", rx, 142, 0, 0, 0, w=88, h=16, short="Rhythm", enum=presets, tab=0,
-                       varname=name("rhythm", n + 1))
+        rate = P.param("live.dial", f"L{n + 1} Rate", rx + 44, 96, 0, 0, rate_d, h=40, short="Rate", enum=RATES,
+                       tab=0, varname=name("rate", n + 1))
+        feel = P.param("live.menu", f"L{n + 1} Feel", rx + 46, 137, 0, 0, feel_d, w=40, h=12, short="Feel",
+                       enum=[FEEL_LABELS[f] for f in FEELS], tab=0, varname=name("feel", n + 1), fontsize=8.0)
+        menu = P.param("live.menu", f"L{n + 1} Rhythm", rx, 151, 0, 0, 0, w=88, h=16, short="Rhythm", enum=presets,
+                       tab=0, varname=name("rhythm", n + 1))
         to_rhythm = P.obj(f"prepend rhythm {n}", lx, Y + 910)
         P.c(menu, to_rhythm); P.c(to_rhythm, adapter); P.c(preset_menus, menu, n)
         dials = P.obj("unpack 0 0 0", lx, Y + 940, ins=1, outs=3)
@@ -567,9 +574,10 @@ def build_hub():
         rng = P.obj("prepend _parameter_range 0", lx + 60, ly + 30)
         P.c(length, len_t); P.c(len_t, rng, 1); P.c(rng, hits)
 
-        lane = P.obj(f"pak {hits_d} {len_d} {rot_d} {rate_d}", lx, ly + 60, ins=4)
+        lane = P.obj(f"pak {hits_d} {len_d} {rot_d} {rate_d} {feel_d}", lx, ly + 60, ins=5)
         prep = P.obj(f"prepend lane {n}", lx, ly + 90)
         P.c(hits, lane, 0, 0); P.c(len_t, lane, 0, 1); P.c(rotate, lane, 0, 2); P.c(rate, lane, 0, 3)
+        P.c(feel, lane, 0, 4)
         P.c(lane, prep); P.c(prep, adapter)
 
         # pending bank, Cycle length (fractional for odd rates) and "now" flag (take it up at the next tick), held

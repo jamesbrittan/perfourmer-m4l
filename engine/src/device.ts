@@ -10,7 +10,7 @@ export const VOICES = 4;
 export const PITCH_STEPS = 8;
 
 /** The native player: its table resolution in ticks (it reads slot floor(position / gridTicks)), the table key
- * layout ((lane * 2 + bank) * bankSize + slot), the Reset period meaning "never" (usable in its modulo), and the
+ * layout ((lane * 2 + bank) * bankSize + slot; a bank must hold the longest Cycle's slots), the Reset period meaning "never" (usable in its modulo), and the
  * dict it notes each Lane's playing bank in. */
 export const PLAYER = { gridTicks: 2, bankSize: 10000, noReset: 1e12, dict: "pf4.player" } as const;
 
@@ -43,6 +43,7 @@ export const LANE_DEFAULTS: LaneParams[] = [
 ].map((lane, n) => ({
   rotate: 0,
   rate: "1/16",
+  feel: "straight",
   pitchCycle: [0],
   transpose: 0,
   octave: 0,
@@ -88,6 +89,7 @@ export const CONTROL_NAMES = {
   length: "dial_L{lane}_len",
   rotate: "dial_L{lane}_rot",
   rate: "dial_L{lane}_rate",
+  feel: "menu_L{lane}_feel",
   rhythm: "menu_L{lane}_rhythm",
 } as const;
 
