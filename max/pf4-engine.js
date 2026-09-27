@@ -45,7 +45,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -139,7 +139,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
