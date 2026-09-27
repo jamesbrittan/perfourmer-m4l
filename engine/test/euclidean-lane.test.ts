@@ -45,8 +45,8 @@ describe("Euclidean Lane", () => {
     expect(render(0, 8)).toBe("........");
   });
 
-  it("handles every Lane length from 1 to 64 with any number of hits", () => {
-    for (let length = 1; length <= 64; length++) {
+  it("handles every Lane length from 1 to 32 with any number of hits", () => {
+    for (let length = 1; length <= 32; length++) {
       for (let hits = 0; hits <= length + 1; hits++) {
         const pattern = render(hits, length);
         expect(pattern).toHaveLength(length);

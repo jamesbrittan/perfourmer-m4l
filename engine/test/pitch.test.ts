@@ -67,8 +67,8 @@ describe("Lane transpose", () => {
   });
 
   it("keeps notes inside the MIDI range", () => {
-    expect(pitches({ pitchCycle: [0, 7, 14], octave: 5 }, undefined, 0, 3)).toEqual([120, 127, 127]);
-    expect(pitches({ pitchCycle: [0, -7], octave: -5 }, undefined, 0, 2)).toEqual([0, 0]);
+    expect(pitches({ pitchCycle: [0, 7, 14], transpose: 7, octave: 3 }, undefined, 0, 3)).toEqual([108, 120, 127]);
+    expect(pitches({ pitchCycle: [0, -14], transpose: -7, octave: -3 }, undefined, 0, 2)).toEqual([12, 0]);
   });
 });
 
