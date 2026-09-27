@@ -49,8 +49,7 @@ export const RHYTHM_PRESETS: readonly {
   })),
 ];
 
-/** tie: the note lasts right up to the next one (gap gate at 100%), so the two join legato. */
-export type Event = { onset: number; duration: number; pitch: number; velocity: number; voice: number; tie?: boolean };
+export type Event = { onset: number; duration: number; pitch: number; velocity: number; voice: number };
 /** Step length in ticks at 480 PPQ, slowest first. Q = quintuplet, T = triplet, S = septuplet. */
 const RATE_TICKS = {
   "1/1": 1920,
@@ -133,11 +132,9 @@ export type EngineConfig = {
 };
 /** The Voicing Matrix as each Lane's Voices (1–4), Lane by Lane. */
 export type VoiceLayout = readonly (readonly number[])[];
-/** One player grid slot: the [voice, pitch, velocity] messages due there (velocity 0 = note-off). */
-export type Slot = { slot: number; notes: [number, number, number][] };
-/** A note-off that falls past the end of a Cycle, due at `slot` of the next one. */
-export type Carry = { slot: number; voice: number; pitch: number; tie: boolean };
-export type CycleTable = { slots: Slot[]; carry: Carry[] };
+/** One player grid slot: the notes that start there, as [voice, pitch, velocity, length in ticks]. Each Voice
+ * device plays them with makenote, so every note ends by itself. */
+export type Slot = { slot: number; notes: [number, number, number, number][] };
 /** What a Lane shows at a song position: its Cycle, the playhead step (from 0), the Cycle's steps in rows of 16
  * (true = a hit sounds), whether Mutation or probability changed it from the Base, and the Capture depth. */
 export type LaneView = { cycleIndex: number; step: number; rows: boolean[][]; mutated: boolean; captureDepth: number };
@@ -148,6 +145,10 @@ const MIDDLE_C = 60;
 /** A Voice Layout change made while playing waits for a bar at least this far ahead (an eighth note), so the
  * Cycles rendered for it reach the player in time. */
 const CHANGE_LEAD = 240;
+/** A note followed by the same pitch on its Voice ends at least this many ticks before it (so the synth sees the
+ * gate close and retriggers); one running into a different pitch lasts this much longer (so the two join legato). */
+const RETRIGGER_TICKS = 6;
+const LEGATO_TICKS = 6;
 const C_MAJOR: Scale = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
 
 /** Bjorklund's algorithm: the Euclidean rhythms as tabulated by Toussaint (first hit on step 0). */
@@ -250,7 +251,6 @@ export function createEngine() {
     // the gap after the last hit runs to the next Cycle's first hit
     const next = cycleHits(lane, cycleIndex + 1)[0]?.onset ?? playedTicks(lane, cycleIndex + 1);
     const gaps = sounding.map(({ onset }, i) => (i + 1 < sounding.length ? sounding[i + 1].onset : end + next) - onset);
-    const tie = gate >= 100;
     const noteLength = (gap: number) =>
       gate <= 50 ? (step * gate) / 100 : step / 2 + ((gap - step / 2) * (gate - 50)) / 50; // short … half a step … tied
     const toPitch = (degree: number) => clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave);
@@ -264,7 +264,6 @@ export function createEngine() {
         onset,
         duration,
         velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
-        ...(tie && !cut && { tie }),
       };
       return allocate(lane, degree, count, toPitch, before ? layoutChange.from : voiceLayout).map(({ voice, pitch }) => ({
         ...note,
@@ -364,89 +363,36 @@ export function createEngine() {
   }
 
   /**
-   * A Cycle as the fine-grid player reads it: messages grouped by grid slot, in slot order, plus the note-offs
-   * that fall past its end (`carry`, to hand to the next Cycle's table as `carried`).
-   * Within a slot, a note-off for a pitch that starts again there comes first (a clean retrigger); other note-offs
-   * come after the note-ons, so consecutive notes join legato. A tied note running into the same pitch is simply
-   * held: neither its note-off nor the next note-on is sent.
-   * `replacing` is the table this one takes over from part-way through the Cycle (after a Gate change): its
-   * note-offs that come later than the new ones are kept (including those it carried into the next Cycle), so a
-   * note already sounding is still ended.
+   * A Cycle as the fine-grid player reads it: the notes starting in each grid slot, in slot order, each with the
+   * length it should last from that slot. The player reads slot floor(position / grid) on ticks one grid step
+   * apart, so a note sounds up to a slot early; lengths are measured from there. A note followed by the same pitch
+   * on its Voice (in this Cycle or the next) ends RETRIGGER_TICKS before it; one that reaches a different pitch
+   * lasts LEGATO_TICKS past its start. No note is shorter than a slot.
    */
-  function cycleTable(
-    lane: number,
-    gridTicks: number,
-    cycleIndex = 0,
-    carried: Carry[] = [],
-    replacing: CycleTable = { slots: [], carry: [] },
-  ): CycleTable {
-    // The player reads slot floor(position / grid) on ticks one grid step apart, so from each Cycle's start it
-    // reaches slots 0, 1, 2, … in turn. When Cycles aren't a whole number of slots (septuplets), a Cycle can start
-    // up to a slot's width before its first tick, so its last slot isn't always reached: anything due there goes
-    // into the next Cycle.
+  function slotTable(lane: number, gridTicks: number, cycleIndex = 0): Slot[] {
     const slotOf = (tick: number) => Math.floor(tick / gridTicks + 1e-9);
     const end = playedTicks(lane, cycleIndex);
+    // When Cycles aren't a whole number of slots (septuplets), a Cycle can start up to a slot's width before its
+    // first tick, so its last slot isn't always reached: a note due there starts a slot earlier.
     const aligned = Number.isInteger(cycleTicks(lane) / gridTicks) && Number.isInteger(end / gridTicks);
     const lastSlot = aligned ? end / gridTicks - 1 : Math.ceil(end / gridTicks) - 2;
-    const nextCycleSlot = (tick: number) => Math.max(0, slotOf(tick - end));
-    type Off = { slot: number; voice: number; pitch: number; tie: boolean };
-    const ons: Event[] = renderCycle(lane, cycleIndex);
-    const carry: Carry[] = [];
-    // a carried note-off due after this Cycle's end (a Reset cut it short) is carried on again
-    const offs: Off[] = carried.filter((off) => off.slot <= lastSlot);
-    for (const off of carried) if (off.slot > lastSlot) carry.push({ ...off, slot: nextCycleSlot(off.slot * gridTicks) });
-    for (const e of ons) {
-      const off = { voice: e.voice, pitch: e.pitch, tie: Boolean(e.tie) };
-      const tick = e.onset + e.duration;
-      // an off at (or within half a slot of) the Cycle's end belongs to the next Cycle, after its first note-on
-      const slot = Math.max(slotOf(tick), slotOf(e.onset) + 1); // never in its own note-on's slot
-      if (slot > lastSlot) carry.push({ ...off, slot: nextCycleSlot(tick) });
-      else offs.push({ ...off, slot });
-    }
-    const held = (off: Off) => (e: Event) =>
-      off.tie && slotOf(e.onset) === off.slot && e.voice === off.voice && e.pitch === off.pitch;
-    const skippedOns = new Set<Event>();
-    const sentOffs = offs.filter((off) => {
-      const continued = ons.find(held(off));
-      if (continued) skippedOns.add(continued);
-      return !continued;
-    });
-    const sent = new Set(sentOffs);
-    // A note the replaced table started ends at its old note-off unless the new table has the very same note
-    // (same start slot, Voice and pitch) and ends it later. Erring this way can end a note early during edits,
-    // never leave one hanging.
-    const oldOns = replacing.slots.flatMap(({ slot, notes }) =>
-      notes.filter(([, , velocity]) => velocity > 0).map(([voice, pitch]) => ({ slot, voice, pitch })),
-    );
-    const newEnd = (on: { slot: number; voice: number; pitch: number }) => {
-      const e = ons.find((x) => slotOf(x.onset) === on.slot && x.voice === on.voice && x.pitch === on.pitch);
-      if (!e || skippedOns.has(e)) return -Infinity;
-      const off = offs.find((o) => o.voice === e.voice && o.pitch === e.pitch && o.slot > on.slot);
-      if (off) return sent.has(off) ? off.slot : Infinity;
-      return carry.some((c) => c.voice === e.voice && c.pitch === e.pitch) ? Infinity : -Infinity;
-    };
-    for (const { slot, notes } of replacing.slots)
-      for (const [voice, pitch, velocity] of notes) {
-        if (velocity !== 0) continue;
-        const started = oldOns.filter((o) => o.voice === voice && o.pitch === pitch && o.slot < slot).pop();
-        const duplicate = sentOffs.some((o) => o.slot === slot && o.voice === voice && o.pitch === pitch);
-        if (!duplicate && !(started && newEnd(started) >= slot)) sentOffs.push({ slot, voice, pitch, tie: false });
-      }
+    const at = (e: Event, offset = 0) => (Math.min(slotOf(e.onset), lastSlot) + offset) * gridTicks;
+    const events = renderCycle(lane, cycleIndex);
+    const following = [
+      ...events.map((e) => ({ ...e, start: at(e) })),
+      ...renderCycle(lane, cycleIndex + 1).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + end })),
+    ];
     const slots = new Map<number, Slot["notes"]>();
-    const add = (slot: number, note: [number, number, number]) => slots.set(slot, [...(slots.get(slot) ?? []), note]);
-    const onsAt = (slot: number) => ons.filter((e) => !skippedOns.has(e) && slotOf(e.onset) === slot);
-    const retriggers = (off: Off) => onsAt(off.slot).some((e) => e.voice === off.voice && e.pitch === off.pitch);
-    for (const off of sentOffs.filter(retriggers)) add(off.slot, [off.voice, off.pitch, 0]);
-    for (const e of ons) if (!skippedOns.has(e)) add(slotOf(e.onset), [e.voice, e.pitch, e.velocity]);
-    for (const off of sentOffs.filter((off) => !retriggers(off))) add(off.slot, [off.voice, off.pitch, 0]);
-    const same = (a: Carry) => (b: Carry) => a.voice === b.voice && a.pitch === b.pitch;
-    const identical = (a: Carry) => (b: Carry) => same(a)(b) && a.slot === b.slot && a.tie === b.tie;
-    for (const old of replacing.carry) if (!carry.some(identical(old))) carry.push({ ...old, tie: false });
-    return { slots: [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes })), carry };
-  }
-
-  function slotTable(lane: number, gridTicks: number, cycleIndex = 0): Slot[] {
-    return cycleTable(lane, gridTicks, cycleIndex).slots;
+    for (const e of events) {
+      const start = at(e);
+      let length = e.onset + e.duration - start;
+      const next = following.find((n) => n.voice === e.voice && n.start > start);
+      if (next && next.pitch === e.pitch) length = Math.min(length, next.start - start - RETRIGGER_TICKS);
+      else if (next && start + length >= next.start) length = next.start - start + LEGATO_TICKS;
+      const slot = start / gridTicks;
+      slots.set(slot, [...(slots.get(slot) ?? []), [e.voice, e.pitch, e.velocity, Math.max(gridTicks, length)]]);
+    }
+    return [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes }));
   }
 
   return {
@@ -487,18 +433,13 @@ export function createEngine() {
     setVoiceLayout(layout: VoiceLayout, songTicks?: number) {
       changeLayout(layout.map((voices) => [...voices]), songTicks);
     },
-    /** The Voices a Lane's player must release: its own, plus those it gave up in a change that hasn't landed. */
-    releaseVoices(lane: number): number[] {
-      return [...new Set([...(layoutChange.from[lane] ?? []), ...laneVoices(lane)])].sort((a, b) => a - b);
-    },
     /** Forget the Voice Layout a change replaced once the bar it landed on has played (a jump back in the song
-     * then hears the new layout). Returns whether it did, i.e. whether releaseVoices may have changed. */
+     * then hears the new layout). Returns whether it did. */
     retireVoiceLayout(songTicks: number): boolean {
       if (layoutChange.from === voiceLayout || songTicks < layoutChange.at + ticksPerBar) return false;
       layoutChange = { from: voiceLayout, at: 0 };
       return true;
     },
-    cycleTable,
     slotTable,
     /** What the Lane shows at a song position (the pattern view and readouts). The Cycle is worked out once and
      * kept until it or the Lane's settings change, so polling is cheap. */

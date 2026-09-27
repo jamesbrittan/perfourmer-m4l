@@ -35,7 +35,7 @@ Live MIDI Track
 1. **PF4 Hub (`PF4 Hub.amxd`)**:
    The central control and sequencing device. Contains the rhythm generators, pitch cycles, mutation engines, timbre LFOs, and voice allocation matrix. Displays live pattern representations with moving playheads.
 2. **PF4 Voice (`PF4 Voice.amxd`)**:
-   A lightweight voice receiver placed at the head of each voice chain in an Instrument Rack. Filters and gates note and timbre messages addressed to its voice number (1–4) and routes them directly to an External Instrument device or soft synth.
+   A lightweight voice receiver placed at the head of each voice chain in an Instrument Rack. Picks out the note and timbre messages addressed to its voice number (1–4) and plays each note with `makenote`, so every note ends after its own length, then passes the MIDI on to an External Instrument device or soft synth.
 
 > **Perfourmer Setting**: Set the Vermona Perfourmer's front-panel Play Mode switch to **M1** (Monophonic 1). The sequencer handles all polyphony, chord spacing, and voice cycling internally.
 

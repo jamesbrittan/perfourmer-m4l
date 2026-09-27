@@ -200,10 +200,9 @@ function xoroshiro128plus(seed) {
 }
 
 // src/scheduler.ts
-var EMPTY = { slots: [], carry: [] };
 function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: reported, send }) {
   const each = (make) => Array.from({ length: lanes }, make);
-  const emptyBank = () => ({ cycle: 0, keys: [], table: EMPTY, carried: [], frame: "" });
+  const emptyBank = () => ({ cycle: 0, keys: [] });
   const banks = each(() => [emptyBank(), emptyBank()]);
   const offered = each(() => -1);
   const adoptedAt = each(() => null);
@@ -216,7 +215,7 @@ function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: repo
   const playingCycle = (n) => banks[n][playingBank(n)].cycle;
   const pendingCycle = (n) => offered[n] !== -1 && offered[n] !== playingBank(n) ? banks[n][offered[n]].cycle : null;
   function withdraw(n) {
-    send({ type: "offer", lane: n, bank: -1, cycleTicks: 0, now: false, release: false });
+    send({ type: "offer", lane: n, bank: -1, cycleTicks: 0, now: false });
     offered[n] = -1;
   }
   function soundingCycle(n) {
@@ -229,24 +228,18 @@ function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: repo
   function render(n, cycleIndex, now = false) {
     withdraw(n);
     const playingNow = playingBank(n);
-    const current = banks[n][playingNow];
-    if (cycleIndex === null) cycleIndex = current.cycle;
+    if (cycleIndex === null) cycleIndex = banks[n][playingNow].cycle;
     const bank = 1 - playingNow;
-    const frame = `${engine.cycleTicks(n)}/${engine.resetTicks()}`;
-    const release = playing && frame !== current.frame;
-    const handOn = playing && !release;
-    const carried = !handOn ? [] : now ? current.carried : current.table.carry;
-    const table = engine.cycleTable(n, gridTicks, cycleIndex, carried, handOn && now ? current.table : EMPTY);
     const target = banks[n][bank];
     for (const key of target.keys) send({ type: "remove", key });
-    target.keys = table.slots.map(({ slot, notes }) => {
+    target.keys = engine.slotTable(n, gridTicks, cycleIndex).map(({ slot, notes }) => {
       const key = (n * 2 + bank) * bankSize + slot;
       send({ type: "write", key, notes });
       return key;
     });
-    Object.assign(target, { cycle: cycleIndex, table, carried, frame });
+    target.cycle = cycleIndex;
     offered[n] = bank;
-    send({ type: "offer", lane: n, bank, cycleTicks: engine.cycleTicks(n), now: now && playing, release });
+    send({ type: "offer", lane: n, bank, cycleTicks: engine.cycleTicks(n), now: now && playing });
   }
   function follow(n, cycleIndex) {
     if (!playing) {
@@ -392,6 +385,8 @@ var LOWEST_BASS = 24;
 var VIEW_ROW = 16;
 var MIDDLE_C = 60;
 var CHANGE_LEAD = 240;
+var RETRIGGER_TICKS = 6;
+var LEGATO_TICKS = 6;
 var C_MAJOR = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
 function bjorklund(hits, length) {
   hits = Math.max(0, Math.min(hits, length));
@@ -467,7 +462,6 @@ function createEngine() {
     const sounding = cycleHits(lane, cycleIndex);
     const next = cycleHits(lane, cycleIndex + 1)[0]?.onset ?? playedTicks(lane, cycleIndex + 1);
     const gaps = sounding.map(({ onset }, i) => (i + 1 < sounding.length ? sounding[i + 1].onset : end + next) - onset);
-    const tie = gate >= 100;
     const noteLength = (gap) => gate <= 50 ? step * gate / 100 : step / 2 + (gap - step / 2) * (gate - 50) / 50;
     const toPitch = (degree) => clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave);
     const start = cycleStart(lane, cycleIndex);
@@ -479,8 +473,7 @@ function createEngine() {
       const note = {
         onset,
         duration,
-        velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
-        ...tie && !cut && { tie }
+        velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0)))
       };
       return allocate(lane, degree, count, toPitch, before ? layoutChange.from : voiceLayout).map(({ voice, pitch }) => ({
         ...note,
@@ -550,62 +543,28 @@ function createEngine() {
       offsetTicks: sinceReset % cycle
     };
   }
-  function cycleTable(lane, gridTicks, cycleIndex = 0, carried = [], replacing = { slots: [], carry: [] }) {
+  function slotTable(lane, gridTicks, cycleIndex = 0) {
     const slotOf = (tick) => Math.floor(tick / gridTicks + 1e-9);
     const end = playedTicks(lane, cycleIndex);
     const aligned = Number.isInteger(cycleTicks(lane) / gridTicks) && Number.isInteger(end / gridTicks);
     const lastSlot = aligned ? end / gridTicks - 1 : Math.ceil(end / gridTicks) - 2;
-    const nextCycleSlot = (tick) => Math.max(0, slotOf(tick - end));
-    const ons = renderCycle(lane, cycleIndex);
-    const carry = [];
-    const offs = carried.filter((off) => off.slot <= lastSlot);
-    for (const off of carried) if (off.slot > lastSlot) carry.push({ ...off, slot: nextCycleSlot(off.slot * gridTicks) });
-    for (const e of ons) {
-      const off = { voice: e.voice, pitch: e.pitch, tie: Boolean(e.tie) };
-      const tick = e.onset + e.duration;
-      const slot = Math.max(slotOf(tick), slotOf(e.onset) + 1);
-      if (slot > lastSlot) carry.push({ ...off, slot: nextCycleSlot(tick) });
-      else offs.push({ ...off, slot });
-    }
-    const held = (off) => (e) => off.tie && slotOf(e.onset) === off.slot && e.voice === off.voice && e.pitch === off.pitch;
-    const skippedOns = /* @__PURE__ */ new Set();
-    const sentOffs = offs.filter((off) => {
-      const continued = ons.find(held(off));
-      if (continued) skippedOns.add(continued);
-      return !continued;
-    });
-    const sent = new Set(sentOffs);
-    const oldOns = replacing.slots.flatMap(
-      ({ slot, notes }) => notes.filter(([, , velocity]) => velocity > 0).map(([voice, pitch]) => ({ slot, voice, pitch }))
-    );
-    const newEnd = (on) => {
-      const e = ons.find((x) => slotOf(x.onset) === on.slot && x.voice === on.voice && x.pitch === on.pitch);
-      if (!e || skippedOns.has(e)) return -Infinity;
-      const off = offs.find((o) => o.voice === e.voice && o.pitch === e.pitch && o.slot > on.slot);
-      if (off) return sent.has(off) ? off.slot : Infinity;
-      return carry.some((c) => c.voice === e.voice && c.pitch === e.pitch) ? Infinity : -Infinity;
-    };
-    for (const { slot, notes } of replacing.slots)
-      for (const [voice, pitch, velocity] of notes) {
-        if (velocity !== 0) continue;
-        const started = oldOns.filter((o) => o.voice === voice && o.pitch === pitch && o.slot < slot).pop();
-        const duplicate = sentOffs.some((o) => o.slot === slot && o.voice === voice && o.pitch === pitch);
-        if (!duplicate && !(started && newEnd(started) >= slot)) sentOffs.push({ slot, voice, pitch, tie: false });
-      }
+    const at = (e, offset = 0) => (Math.min(slotOf(e.onset), lastSlot) + offset) * gridTicks;
+    const events = renderCycle(lane, cycleIndex);
+    const following = [
+      ...events.map((e) => ({ ...e, start: at(e) })),
+      ...renderCycle(lane, cycleIndex + 1).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + end }))
+    ];
     const slots = /* @__PURE__ */ new Map();
-    const add = (slot, note) => slots.set(slot, [...slots.get(slot) ?? [], note]);
-    const onsAt = (slot) => ons.filter((e) => !skippedOns.has(e) && slotOf(e.onset) === slot);
-    const retriggers = (off) => onsAt(off.slot).some((e) => e.voice === off.voice && e.pitch === off.pitch);
-    for (const off of sentOffs.filter(retriggers)) add(off.slot, [off.voice, off.pitch, 0]);
-    for (const e of ons) if (!skippedOns.has(e)) add(slotOf(e.onset), [e.voice, e.pitch, e.velocity]);
-    for (const off of sentOffs.filter((off2) => !retriggers(off2))) add(off.slot, [off.voice, off.pitch, 0]);
-    const same = (a) => (b) => a.voice === b.voice && a.pitch === b.pitch;
-    const identical = (a) => (b) => same(a)(b) && a.slot === b.slot && a.tie === b.tie;
-    for (const old of replacing.carry) if (!carry.some(identical(old))) carry.push({ ...old, tie: false });
-    return { slots: [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes })), carry };
-  }
-  function slotTable(lane, gridTicks, cycleIndex = 0) {
-    return cycleTable(lane, gridTicks, cycleIndex).slots;
+    for (const e of events) {
+      const start = at(e);
+      let length = e.onset + e.duration - start;
+      const next = following.find((n) => n.voice === e.voice && n.start > start);
+      if (next && next.pitch === e.pitch) length = Math.min(length, next.start - start - RETRIGGER_TICKS);
+      else if (next && start + length >= next.start) length = next.start - start + LEGATO_TICKS;
+      const slot = start / gridTicks;
+      slots.set(slot, [...slots.get(slot) ?? [], [e.voice, e.pitch, e.velocity, Math.max(gridTicks, length)]]);
+    }
+    return [...slots].sort(([a], [b]) => a - b).map(([slot, notes]) => ({ slot, notes }));
   }
   return {
     configure(config) {
@@ -645,18 +604,13 @@ function createEngine() {
     setVoiceLayout(layout, songTicks) {
       changeLayout(layout.map((voices) => [...voices]), songTicks);
     },
-    /** The Voices a Lane's player must release: its own, plus those it gave up in a change that hasn't landed. */
-    releaseVoices(lane) {
-      return [.../* @__PURE__ */ new Set([...layoutChange.from[lane] ?? [], ...laneVoices(lane)])].sort((a, b) => a - b);
-    },
     /** Forget the Voice Layout a change replaced once the bar it landed on has played (a jump back in the song
-     * then hears the new layout). Returns whether it did, i.e. whether releaseVoices may have changed. */
+     * then hears the new layout). Returns whether it did. */
     retireVoiceLayout(songTicks) {
       if (layoutChange.from === voiceLayout || songTicks < layoutChange.at + ticksPerBar) return false;
       layoutChange = { from: voiceLayout, at: 0 };
       return true;
     },
-    cycleTable,
     slotTable,
     /** What the Lane shows at a song position (the pattern view and readouts). The Cycle is worked out once and
      * kept until it or the Lane's settings change, so polling is cheap. */

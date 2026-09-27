@@ -42,7 +42,7 @@ describe("The player, fed by the scheduler", () => {
     expect(hanging(sim, BAR * 10)).toEqual([]);
   });
 
-  it("releases a Lane whose Cycle length or Reset changes, and settles on the new Cycles", () => {
+  it("settles on the new Cycles when a Lane's Cycle length or Reset changes, leaving no note hanging", () => {
     const edits = [
       { at: BAR * 3 + 700, fn: (c: Controls) => c.lane(0, { length: 7, rate: "1/8T" }) },
       { at: BAR * 3 + 900, fn: (c: Controls) => c.articulate(0, { gate: 100 }) },
@@ -56,8 +56,8 @@ describe("The player, fed by the scheduler", () => {
 
   it("starts again where the transport stopped", () => {
     const sim = simulate({ play: [{ start: 0, ticks: BAR * 3 + 500 }, { start: BAR * 3 + 500, ticks: BAR * 6 }], setup: gap(80) });
-    const [from, to] = [BAR * 3 + 502, BAR * 9 + 20]; // from just after the stop's own note-offs
-    expect(between(sim, from, to)).toEqual(expected(sim, from, to));
+    const [from, to] = [BAR * 3 + 500, BAR * 9 + 20]; // the stop ended every note, so only notes from the restart
+    expect(between(sim, from + 2, to)).toEqual(expected(sim, from + 2, to, true));
   });
 
   it("follows a jump in song position", () => {

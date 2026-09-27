@@ -4,16 +4,15 @@
 // commands on outlets 0 and 1.
 autowatch = 1;
 inlets = 1;
-outlets = 14; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
-// switch at the next tick rather than the next Cycle boundary; release 1 = release the Lane's Voice on switching),
+outlets = 13; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now>" pending (bank -1 = withdrawn; now 1 =
+// switch at the next tick rather than the next Cycle boundary),
 // 2: Voice status text,
 // 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts (lanes 4–7: Base readouts),
 // 5: transport running (1) / stopped (0), 6: "set <text>" Scale readout, 7: Captured Bases as numbers (to the
 // stored-only pattr that saves them with the set), 8: "<lane> set <text>" pattern view,
 // 9: "<lane> <hits> <rotate> <length>" to set a Lane's dials from a Rhythm Preset, 10: "<lane> set 0" to show the
 // Rhythm Preset menu as "—" once the dials no longer match the preset, 11: "<lane> set <text>" the Lane's Voices,
-// 12: "<lane> <voice> …" the Voices the player releases for that Lane (current and, during a Voice Layout change,
-// previous), 13: scripting messages to thispatcher (Voicing Matrix buttons, enabling the Lane's controls)
+// 12: scripting messages to thispatcher (Voicing Matrix buttons, enabling the Lane's controls)
 
 const { createEngine, createScheduler, RATES, RHYTHM_PRESETS, GROUP_MODES, CHORD_SHAPES } = require("pf4-engine.js");
 
@@ -48,8 +47,8 @@ const scheduler = createScheduler({
     if (command.type === "write") outlet(0, [command.key].concat(...command.notes));
     else if (command.type === "remove") outlet(0, "remove", command.key);
     else {
-      const { lane, bank, cycleTicks, now, release } = command;
-      outlet(1, lane, bank, cycleTicks, now ? 1 : 0, release ? 1 : 0); // while stopped the player adopts at once
+      const { lane, bank, cycleTicks, now } = command;
+      outlet(1, lane, bank, cycleTicks, now ? 1 : 0); // while stopped the player adopts at once
     }
   },
 });
@@ -134,7 +133,7 @@ function voice(n, v, state) {
   for (let m = 0; m < LANES; m++)
     for (let w = 1; w <= 4; w++) {
       const on = engine.laneVoices(m).includes(w);
-      if (m !== Number(n) && on !== before[m].includes(w)) outlet(13, "script", "send", `btn_L${m + 1}_V${w}`, on ? 1 : 0);
+      if (m !== Number(n) && on !== before[m].includes(w)) outlet(12, "script", "send", `btn_L${m + 1}_V${w}`, on ? 1 : 0);
     }
   engine.configure({ lanes: params, ...song });
   for (let m = 0; m < LANES; m++) scheduler.changedNow(m);
@@ -153,19 +152,19 @@ function updateMatrixActiveStates() {
     const chordName = `menu_L${n + 1}_chord`;
 
     // Send active state to object inlet (visual dimming)
-    outlet(13, "script", "send", gmName, "active", gmActive);
-    outlet(13, "script", "send", chordName, "active", chordActive);
+    outlet(12, "script", "send", gmName, "active", gmActive);
+    outlet(12, "script", "send", chordName, "active", chordActive);
 
     // Send ignoreclick attribute to box (strictly disables mouse clicks)
-    outlet(13, "script", "sendbox", gmName, "ignoreclick", gmActive ? 0 : 1);
-    outlet(13, "script", "sendbox", chordName, "ignoreclick", chordActive ? 0 : 1);
+    outlet(12, "script", "sendbox", gmName, "ignoreclick", gmActive ? 0 : 1);
+    outlet(12, "script", "sendbox", chordName, "ignoreclick", chordActive ? 0 : 1);
 
     // Rhythm view: grey out (active 0) if count === 0, but keep clickable (no ignoreclick)
-    outlet(13, "script", "send", `dial_L${n + 1}_hits`, "active", gmActive);
-    outlet(13, "script", "send", `dial_L${n + 1}_len`, "active", gmActive);
-    outlet(13, "script", "send", `dial_L${n + 1}_rot`, "active", gmActive);
-    outlet(13, "script", "send", `dial_L${n + 1}_rate`, "active", gmActive);
-    outlet(13, "script", "send", `menu_L${n + 1}_rhythm`, "active", gmActive);
+    outlet(12, "script", "send", `dial_L${n + 1}_hits`, "active", gmActive);
+    outlet(12, "script", "send", `dial_L${n + 1}_len`, "active", gmActive);
+    outlet(12, "script", "send", `dial_L${n + 1}_rot`, "active", gmActive);
+    outlet(12, "script", "send", `dial_L${n + 1}_rate`, "active", gmActive);
+    outlet(12, "script", "send", `menu_L${n + 1}_rhythm`, "active", gmActive);
 
     // Direct JS patcher access if available
     if (typeof this !== "undefined" && this.patcher && this.patcher.getnamed) {
@@ -197,7 +196,6 @@ function group(n, modeIndex, shapeIndex) {
 
 function showLaneVoices() {
   for (let n = 0; n < LANES; n++) {
-    outlet(12, n, ...engine.releaseVoices(n));
     const voices = engine.laneVoices(n);
     const mode = voices.length > 1 ? ` ${params[n].groupMode || "poly"}` : "";
     const text = !voices.length ? "off" : voices.length === 1 ? `V${voices[0]}` : `V${voices.join("+")}${mode}`;
@@ -304,7 +302,7 @@ function bang() {
 
 // song position (polled a few times a second): show where each Lane is, from the engine's own locate()
 function where(songTicks) {
-  if (scheduler.playing && engine.retireVoiceLayout(songTicks)) showLaneVoices();
+  if (scheduler.playing) engine.retireVoiceLayout(songTicks);
   scheduler.poll(songTicks);
   for (let n = 0; n < LANES; n++) {
     const { cycleIndex, step, rows, mutated, captureDepth } = engine.laneView(n, songTicks);
