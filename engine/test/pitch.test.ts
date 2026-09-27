@@ -77,7 +77,7 @@ describe("Player table", () => {
     const engine = createEngine();
     engine.configure({ lanes: [{ hits: 3, length: 8, rotate: 0, pitchCycle: [0, 1, 2, 3] }] });
     const noteOns = (cycleIndex: number) =>
-      engine.slotTable(0, 2, cycleIndex).flatMap((s) => s.notes.filter(([, , velocity]) => velocity > 0));
+      engine.slotTable(0, 2, cycleIndex).flatMap((s) => s.notes);
     expect(noteOns(1).map(([, pitch]) => pitch)).toEqual([65, 60, 62]);
   });
 });

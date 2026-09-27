@@ -286,10 +286,8 @@ def build_hub():
     chord_shapes = from_engine("Object.keys(engine.CHORD_SHAPES)")
     lane_voices = P.obj(lanes_route(), 1300, Y + 210, ins=2, outs=LANES + 1)
     P.c(adapter, lane_voices, OUT["laneVoices"])
-    release_reach = P.obj(lanes_route(), 1300, Y + 240, ins=2, outs=LANES + 1)
-    P.c(adapter, release_reach, OUT["releaseVoices"])
     table = P.obj("coll", 4, Y + 40, ins=1, outs=4)
-    shared_notes = P.obj("zl iter 3", 4, Y + 80, ins=2, outs=2)
+    shared_notes = P.obj("zl iter 4", 4, Y + 80, ins=2, outs=2)  # [voice pitch velocity length] per note
     pending = P.obj(lanes_route(), 200, Y + 40, ins=2, outs=LANES + 1)
     bus = P.obj(f"send {VOICE_BUS}", 4, Y + 700)
     hub_in = P.obj(f"receive {HUB_BUS}", 200, Y - 30, ins=0)
@@ -332,17 +330,16 @@ def build_hub():
     # --- Live API (via the adapter): transport running/stopped and time signature
     here = P.obj("live.thisdevice", 1000, Y, ins=1, outs=3)
     observe = P.msg("observe", 1000, Y + 30)
-    started = P.obj("sel 0 1", 1000, Y + 120, ins=3, outs=3)
-    release_all = P.msg("releaseall", 1000, Y + 150)
     rollcall = P.msg("rollcall", 1100, Y + 30)
     load = P.obj("loadbang", 1200, Y)
     P.c(here, observe); P.c(observe, adapter)
-    P.c(adapter, started, OUT["transport"])
     stopped_now = P.obj("== 0", 1100, Y + 90, ins=2)  # 1 while the transport is stopped
     P.c(adapter, stopped_now, OUT["transport"])
-    P.c(started, release_all, 0); P.c(release_all, bus)
-    late_release = P.obj("delay 50", 1100, Y + 150, ins=2)   # catch any straggler after the stop
-    P.c(started, late_release, 0); P.c(late_release, release_all)
+    # stopping the transport ends every note at once, as Live's clips do: each Voice's makenote sends the note-offs
+    # it is holding, instead of letting notes run on for their full length
+    on_stop = P.obj("sel 0", 1100, Y + 120, ins=2, outs=2)
+    stop_notes = P.msg("stop", 1100, Y + 150)
+    P.c(adapter, on_stop, OUT["transport"]); P.c(on_stop, stop_notes); P.c(stop_notes, bus)
     P.c(here, rollcall); P.c(rollcall, bus)          # ask Voices that loaded before us to announce
     # position readouts: poll song position and let the engine's locate() describe each Lane
     poll = P.obj("metro 100 @active 1", 1300, Y, ins=2)
@@ -368,9 +365,6 @@ def build_hub():
     lfo_pos = P.obj("transport", 1700, Y + 30, ins=2, outs=9)
     lfo_fan = P.obj("t " + " ".join(["f"] * (2 * LANES)), 1700, Y + 60, ins=1, outs=2 * LANES)
     P.c(lfo_clock, lfo_pos); P.c(lfo_pos, lfo_fan, 7)
-    # a jump in song position skips note-offs: release every Voice (this runs before any Lane's lookups)
-    jumped = P.obj("sel 0", 700, Y + 130, ins=2, outs=2)
-    P.c(contiguous, jumped); P.c(jumped, release_all)
 
     # --- Tab Selector (x = 285, y = 4, w = 360, h = 20)
     hub_tab = P.param("live.tab", "Hub Tab", 285, 4, 0, 5, 0, w=360, h=20, short="Tab",
@@ -578,17 +572,15 @@ def build_hub():
         P.c(hits, lane, 0, 0); P.c(len_t, lane, 0, 1); P.c(rotate, lane, 0, 2); P.c(rate, lane, 0, 3)
         P.c(lane, prep); P.c(prep, adapter)
 
-        # pending bank, Cycle length (fractional for odd rates), "now" flag (take it up at the next tick) and
-        # "release" flag (release the Voice on taking it up), held until adopted
+        # pending bank, Cycle length (fractional for odd rates) and "now" flag (take it up at the next tick), held
+        # until adopted
         arrived = P.obj("t b l", lx, ly + 110, ins=1, outs=2)
-        unpack = P.obj("unpack 0 0. 0 0", lx, ly + 130, ins=1, outs=4)
+        unpack = P.obj("unpack 0 0. 0", lx, ly + 130, ins=1, outs=3)
         pend_bank = P.obj("i -1", lx, ly + 160, ins=2)
         pend_ticks = P.obj(f"f {len_d * 120}", lx + 60, ly + 160, ins=2)
         now_flag = P.obj("i 0", lx + 180, ly + 160, ins=2)
-        rel_flag = P.obj("i 0", lx + 220, ly + 160, ins=2)
         P.c(pending, arrived, n); P.c(arrived, unpack, 1)
-        P.c(unpack, pend_bank, 0, 1); P.c(unpack, pend_ticks, 1, 1)
-        P.c(unpack, now_flag, 2, 1); P.c(unpack, rel_flag, 3, 1)
+        P.c(unpack, pend_bank, 0, 1); P.c(unpack, pend_ticks, 1, 1); P.c(unpack, now_flag, 2, 1)
         when_stopped = P.obj("gate 1 1", lx + 120, ly + 130, ins=2)  # stopped: take it up now, not at play
         P.c(arrived, when_stopped, 0, 1); P.c(stopped_now, when_stopped, 0, 0)
 
@@ -619,43 +611,26 @@ def build_hub():
         P.c(load, init_key); P.c(init_key, key, 0, 3)
 
         adopt_now = P.obj("t b", lx + 60, ly + 350)
-        has_pending = P.obj("sel -1", lx + 60, ly + 380, ins=2, outs=2)
-        adopt_t = P.obj("t i b i i b", lx + 60, ly + 410, ins=1, outs=5)
+        has_pending = P.obj("sel -1", lx + 60, ly + 380, ins=2, outs=2)  # -1: nothing pending, keep playing the bank
+        adopt_t = P.obj("t i i i b", lx + 60, ly + 410, ins=1, outs=4)
         bank_key = P.obj(f"+ {n * 2}", lx + 110, ly + 440, ins=2)
         noted = P.obj(f"prepend replace lane{n}", lx + 200, ly + 440)
         at_tick = P.obj("pack 0 0", lx + 160, ly + 470, ins=2)
         to_adapter = P.obj(f"prepend adopt {n}", lx + 160, ly + 500)
-        # releasing a Lane releases every Voice it may be sounding on (its group, from the adapter)
-        release = P.obj("t b", lx + 60, ly + 470)
-        reach = P.obj("zl reg", lx + 60, ly + 490, ins=2, outs=2)
-        each = P.obj("zl iter 1", lx + 60, ly + 510, ins=2, outs=2)
-        to_voice = P.obj("prepend release", lx + 60, ly + 530)
-        init_reach = P.msg(str(n + 1), lx + 120, ly + 490)
-        P.c(release, reach); P.c(reach, each); P.c(each, to_voice); P.c(to_voice, bus)
-        P.c(release_reach, reach, n, 1); P.c(load, init_reach); P.c(init_reach, reach, 0, 1)
         clear_pending = P.msg("-1", lx + 110, ly + 500)
         clear_now = P.msg("0", lx + 140, ly + 500)
-        releasing = P.obj("sel 1", lx + 20, ly + 440, ins=2, outs=2)
-        # Taking a bank up at once (the stopped path) also releases the Voice: v8 learns the transport started a
-        # moment late, so this can happen just after playback begins; ending the sounding note here keeps it from
-        # hanging when the new bank's note-off is for a different pitch
-        at_once = P.obj("t b b", lx + 120, ly + 330, ins=1, outs=2)
-        P.c(is_new, adopt_now); P.c(when_stopped, at_once); P.c(at_once, adopt_now, 1); P.c(at_once, release, 0); P.c(adopt_now, pend_bank); P.c(pend_bank, has_pending)
-        P.c(has_pending, adopt_t, 1)
-        P.c(has_pending, release, 0)  # a Cycle boundary with nothing pending (v8 fell behind): release, don't hang
-        P.c(take_now, adopt_now)
+        P.c(is_new, adopt_now); P.c(when_stopped, adopt_now); P.c(take_now, adopt_now)
+        P.c(adopt_now, pend_bank); P.c(pend_bank, has_pending); P.c(has_pending, adopt_t, 1)
         # adopting (right to left): new Cycle length; new bank for lookups and in the player dict; clear pending and
-        # the "now" flag; release the Voice if flagged; then tell the adapter (it may offer the next bank at once,
-        # so everything above must already be done)
-        P.c(adopt_t, pend_ticks, 4); P.c(pend_ticks, pos_now, 0, 1); P.c(pend_ticks, key, 0, 1)
-        P.c(adopt_t, bank_key, 3); P.c(bank_key, key, 0, 3); P.c(adopt_t, noted, 3); P.c(noted, player_state)
-        P.c(adopt_t, clear_pending, 2); P.c(clear_pending, pend_bank, 0, 1)
-        P.c(adopt_t, clear_now, 2); P.c(clear_now, now_flag, 0, 1)
-        P.c(adopt_t, rel_flag, 1); P.c(rel_flag, releasing); P.c(releasing, release)
+        # the "now" flag; then tell the adapter (it may offer the next bank at once, so everything above must already
+        # be done). Notes already playing end by themselves (the Voices' makenote), whichever bank they came from.
+        P.c(adopt_t, pend_ticks, 3); P.c(pend_ticks, pos_now, 0, 1); P.c(pend_ticks, key, 0, 1)
+        P.c(adopt_t, bank_key, 2); P.c(bank_key, key, 0, 3); P.c(adopt_t, noted, 2); P.c(noted, player_state)
+        P.c(adopt_t, clear_pending, 1); P.c(clear_pending, pend_bank, 0, 1)
+        P.c(adopt_t, clear_now, 1); P.c(clear_now, now_flag, 0, 1)
         P.c(tick_t, at_tick, 3, 1)                       # the song tick of this adoption
         P.c(adopt_t, at_tick, 0, 0); P.c(at_tick, to_adapter); P.c(to_adapter, adapter)
-        # (no adoption on transport start: the playing bank already holds the Cycle at the song position, and a
-        # bank still pending from before the stop would swap tables under a sounding note)
+        # (no adoption on transport start: the playing bank already holds the Cycle at the song position)
 
     # --- Tab Router Logic (v8.codebox)
     tab_script = f"""
@@ -695,32 +670,38 @@ def build_voice():
     V.comment("= chain number; set this chain's External Instrument to the same MIDI channel", 4, 48, 170)
 
     rcv = V.obj(f"receive {VOICE_BUS}", 4, 200, ins=0)
-    route = V.obj("route release releaseall rollcall touch cc1", 4, 230, ins=2, outs=6)
-    held = V.obj("flush", 4, 440, ins=2, outs=2)  # remembers sounding notes; bang releases them
-    # "release <voice>": only when it's addressed to us
-    rel_mine = V.obj("expr $i1 == $i2", 250, 260, ins=2)
-    rel_sel = V.obj("sel 1", 250, 290, ins=2, outs=2)
-    V.c(rcv, route); V.c(route, rel_mine, 0); V.c(rel_mine, rel_sel); V.c(rel_sel, held)
-    V.c(route, held, 1)
+    route = V.obj("route rollcall touch cc1 stop", 4, 230, ins=2, outs=5)
+    V.c(rcv, route)
     brain = V.codebox(embedded("pf4-voice.js"), 400, 600)
     rc = V.msg("rollcall", 400, 260)
-    V.c(route, rc, 2); V.c(rc, brain)
-    # notes: [voice pitch velocity] -> pass [pitch velocity] if the voice is ours
+    V.c(route, rc, 0); V.c(rc, brain)
+    # notes: [voice pitch velocity length] -> [pitch velocity length] if the voice is ours. makenote plays each note
+    # and ends it after its length, in milliseconds at the current tempo (so a note still ends on time after a stop)
     split = V.obj("t l l", 4, 260, ins=1, outs=2)
     who = V.obj("zl nth 1", 120, 290, ins=2, outs=2)
     mine = V.obj("== 1", 120, 320, ins=2)
     body = V.obj("zl slice 1", 4, 350, ins=2, outs=2)
     gate = V.obj("gate 1", 4, 380, ins=2)
-    pk = V.obj("pack 0 0", 4, 470, ins=2)
-    fmt = V.obj("midiformat 1", 4, 500, ins=7, outs=2)
-    out = V.obj("midiout", 4, 530, ins=1, outs=0)
-    V.c(route, split, 5)
+    tempo_first = V.obj("t l b", 4, 400, ins=1, outs=2)
+    tempo = V.obj("transport", 120, 400, ins=2, outs=9)
+    note = V.obj("unpack 0 0 0.", 4, 420, ins=1, outs=3)
+    to_ms = V.obj("expr $f1 * 125. / $f2", 120, 440, ins=2)  # ticks at 480 per beat -> ms at the tempo
+    make = V.obj("makenote 100 100", 4, 460, ins=3, outs=2)
+    pk = V.obj("pack 0 0", 4, 490, ins=2)
+    fmt = V.obj("midiformat 1", 4, 520, ins=7, outs=2)
+    out = V.obj("midiout", 4, 550, ins=1, outs=0)
+    V.c(route, split, 4)
+    end_all = V.msg("stop", 60, 440)  # the transport stopped: makenote ends every note it is holding now
+    V.c(route, end_all, 3); V.c(end_all, make)
     V.c(split, who, 1); V.c(who, mine); V.c(mine, gate, 0, 0)   # right first: is it for this Voice?
-    V.c(split, body, 0); V.c(body, gate, 1, 1)                  # then pass [pitch velocity]
-    V.c(gate, held); V.c(held, pk, 0, 0); V.c(held, pk, 1, 1); V.c(pk, fmt); V.c(fmt, out)
-    # Voice number drives filtering, MIDI channel, release addressing and the Hub announcement
+    V.c(split, body, 0); V.c(body, gate, 1, 1)                  # then pass [pitch velocity length]
+    V.c(gate, tempo_first); V.c(tempo_first, tempo, 1); V.c(tempo, to_ms, 4, 1)
+    V.c(tempo_first, note, 0)
+    V.c(note, to_ms, 2); V.c(to_ms, make, 0, 2); V.c(note, make, 1, 1); V.c(note, make, 0, 0)
+    V.c(make, pk, 0, 0); V.c(make, pk, 1, 1); V.c(pk, fmt); V.c(fmt, out)
+    # Voice number drives filtering, MIDI channel and the Hub announcement
     # timbre LFOs: "touch <voice> <value>" -> channel aftertouch, "cc1 <voice> <value>" -> CC1, if the voice is ours
-    for k, (outlet_index, fmt_inlet) in enumerate(((3, 4), (4, 2))):
+    for k, (outlet_index, fmt_inlet) in enumerate(((1, 4), (2, 2))):
         t = V.obj("t l l", 600, 260 + 120 * k, ins=1, outs=2)
         whose = V.obj("zl nth 1", 700, 290 + 120 * k, ins=2, outs=2)
         is_mine = V.obj("== 1", 700, 320 + 120 * k, ins=2)
@@ -734,7 +715,7 @@ def build_voice():
             V.c(g, as_cc); V.c(as_cc, fmt, 0, 2)
         else:
             V.c(g, fmt, 0, fmt_inlet)
-    V.c(voice, mine, 0, 1); V.c(voice, fmt, 0, 6); V.c(voice, rel_mine, 0, 1); V.c(voice, brain)
+    V.c(voice, mine, 0, 1); V.c(voice, fmt, 0, 6); V.c(voice, brain)
     here = V.obj("live.thisdevice", 400, 200, ins=1, outs=3)
     V.c(here, brain); V.c(brain, voice)
     V.save_amxd("PF4 Voice.amxd", 180)
