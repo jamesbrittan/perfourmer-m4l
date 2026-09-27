@@ -337,6 +337,15 @@ def build_hub():
     P.c(started, release_all, 0); P.c(release_all, bus)
     late_release = P.obj("delay 50", 1100, Y + 150, ins=2)   # catch any straggler after the stop
     P.c(started, late_release, 0); P.c(late_release, release_all)
+    # a note Live gets at the moment it stops can still be left sounding on the synth (a note-off Live drops, or a
+    # note-on it delivers after the release), and then every Voice believes that note has ended. Once the stop is
+    # well past, each Voice sends a note-off for every pitch it has started since the last sweep; starting playback
+    # again first cancels it
+    sweep_later = P.obj("delay 150", 1200, Y + 150, ins=2)
+    cancel_sweep = P.msg("stop", 1200, Y + 135)
+    sweep = P.msg("sweep", 1200, Y + 170)
+    P.c(started, sweep_later, 0); P.c(started, cancel_sweep, 1); P.c(cancel_sweep, sweep_later)
+    P.c(sweep_later, sweep); P.c(sweep, bus)
     P.c(here, rollcall); P.c(rollcall, bus)          # ask Voices that loaded before us to announce
     # position readouts: poll song position and let the engine's locate() describe each Lane
     poll = P.obj("metro 100 @active 1", 1300, Y, ins=2)
@@ -681,7 +690,7 @@ def build_voice():
     V.comment("= chain number; set this chain's External Instrument to the same MIDI channel", 4, 48, 170)
 
     rcv = V.obj(f"receive {VOICE_BUS}", 4, 200, ins=0)
-    route = V.obj("route release releaseall rollcall touch cc1", 4, 230, ins=2, outs=6)
+    route = V.obj("route release releaseall rollcall touch cc1 sweep", 4, 230, ins=2, outs=7)
     held = V.obj("flush", 4, 440, ins=2, outs=2)  # remembers sounding notes; bang releases them
     # "release <voice>": only when it's addressed to us
     rel_mine = V.obj("expr $i1 == $i2", 250, 260, ins=2)
@@ -700,10 +709,29 @@ def build_voice():
     pk = V.obj("pack 0 0", 4, 470, ins=2)
     fmt = V.obj("midiformat 1", 4, 500, ins=7, outs=2)
     out = V.obj("midiout", 4, 530, ins=1, outs=0)
-    V.c(route, split, 5)
+    V.c(route, split, 6)
     V.c(split, who, 1); V.c(who, mine); V.c(mine, gate, 0, 0)   # right first: is it for this Voice?
     V.c(split, body, 0); V.c(body, gate, 1, 1)                  # then pass [pitch velocity]
     V.c(gate, held); V.c(held, pk, 0, 0); V.c(held, pk, 1, 1); V.c(pk, fmt); V.c(fmt, out)
+    # every pitch started since the last sweep (the Hub sweeps after a stop): "sweep" sends each a note-off, whether
+    # or not flush thinks it has ended, then forgets them all
+    played = V.obj("table ---played", 200, 620, ins=2, outs=2)
+    sent = V.obj("t l l", 200, 500, ins=1, outs=2)
+    is_on = V.obj("expr $i2 > 0", 260, 530)
+    on_gate = V.obj("gate 1", 200, 560, ins=2)
+    on_pitch = V.obj("zl nth 1", 200, 580, ins=2, outs=2)
+    mark_on = V.obj("pack 0 1", 200, 600, ins=2)
+    V.c(pk, sent); V.c(sent, is_on, 1); V.c(is_on, on_gate, 0, 0); V.c(sent, on_gate, 0, 1)
+    V.c(on_gate, on_pitch); V.c(on_pitch, mark_on); V.c(mark_on, played)
+    each = V.obj("uzi 128 0", 300, 560, ins=2, outs=3)
+    pitch_t = V.obj("t i i", 300, 590, ins=1, outs=2)
+    this_pitch = V.obj("i", 360, 650, ins=2)
+    was_on = V.obj("sel 1", 300, 650, ins=2, outs=2)
+    note_off = V.obj("pack 0 0", 360, 680, ins=2)
+    forget = V.msg("clear", 420, 590)
+    V.c(route, each, 5); V.c(each, pitch_t, 2); V.c(pitch_t, this_pitch, 1, 1); V.c(pitch_t, played, 0)
+    V.c(played, was_on); V.c(was_on, this_pitch); V.c(this_pitch, note_off); V.c(note_off, pk)
+    V.c(each, forget, 1); V.c(forget, played)
     # Voice number drives filtering, MIDI channel, release addressing and the Hub announcement
     # timbre LFOs: "touch <voice> <value>" -> channel aftertouch, "cc1 <voice> <value>" -> CC1, if the voice is ours
     for k, (outlet_index, fmt_inlet) in enumerate(((3, 4), (4, 2))):
