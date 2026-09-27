@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEngine, type CycleTable, type LaneParams } from "../src/index";
+import { createEngine, type LaneParams } from "../src/index";
 
 function cycle(lane: Partial<LaneParams>, cycleIndex = 0, resetBars = 0) {
   const engine = createEngine();
@@ -34,11 +34,8 @@ describe("Gate, from 50% to 100%", () => {
     expect(cycle({ gate: 75, rotate: 1 }).map((e) => e.duration)).toEqual([210, 210, 150]);
   });
 
-  it("at 100% ends each note exactly where the next begins, and marks it as tied", () => {
-    const events = cycle({ gate: 100 });
-    expect(events.map((e) => e.onset + e.duration)).toEqual([360, 720, 960]);
-    expect(events.every((e) => e.tie)).toBe(true);
-    expect(cycle({ gate: 99 }).some((e) => e.tie)).toBe(false);
+  it("at 100% ends each note exactly where the next begins", () => {
+    expect(cycle({ gate: 100 }).map((e) => e.onset + e.duration)).toEqual([360, 720, 960]);
   });
 
   it("measures the last gap to where a Reset cuts the Cycle short, and drops hits the Reset cuts off", () => {
@@ -48,92 +45,49 @@ describe("Gate, from 50% to 100%", () => {
   });
 });
 
-describe("Player table with ties", () => {
-  const table = (lane: Partial<LaneParams>, cycleIndex = 0, carried: Parameters<ReturnType<typeof createEngine>["cycleTable"]>[3] = []) => {
+describe("Player table", () => {
+  const table = (lane: Partial<LaneParams>, cycleIndex = 0) => {
     const engine = createEngine();
     engine.configure({ lanes: [{ hits: 3, length: 8, rotate: 0, gate: 100, ...lane }] });
-    return engine.cycleTable(0, 2, cycleIndex, carried);
+    return engine.slotTable(0, 2, cycleIndex);
   };
-  const at = (slots: { slot: number; notes: number[][] }[], slot: number) => slots.find((s) => s.slot === slot)?.notes;
 
-  it("starts the next note before ending the last one, so different pitches join legato", () => {
-    const { slots } = table({ pitchCycle: [0, 2, 4] });
-    expect(at(slots, 180)).toEqual([[1, 64, 100], [1, 60, 0]]);
+  it("gives each note its length, so the Voice device can end it", () => {
+    expect(table({ gate: 50 })).toEqual([
+      { slot: 0, notes: [[1, 60, 100, 60]] },
+      { slot: 180, notes: [[1, 60, 100, 60]] },
+      { slot: 360, notes: [[1, 60, 100, 60]] },
+    ]);
   });
 
-  it("holds a note straight through when it ties into the same pitch", () => {
-    const { slots } = table({ pitchCycle: [0] });
-    expect(slots).toEqual([{ slot: 0, notes: [[1, 60, 100]] }]);
+  it("runs a note just past the start of a different pitch, so the two join legato", () => {
+    // x..x..x. : 360-tick gaps, then 240 to the next Cycle's first hit
+    const lengths = table({ pitchCycle: [0, 2, 4] }).map((s) => s.notes[0][3]);
+    expect(lengths).toEqual([366, 366, 246]);
   });
 
-  it("carries a note-off past the Cycle's end into the next Cycle, after that Cycle's first note starts", () => {
-    const lane = { pitchCycle: [0, 2, 4, 5] };
-    const first = table(lane, 0);
-    expect(first.carry).toEqual([{ slot: 0, voice: 1, pitch: 67, tie: true }]);
-    const next = table(lane, 1, first.carry);
-    expect(at(next.slots, 0)).toEqual([[1, 69, 100], [1, 67, 0]]);
+  it("ends a note just before the same pitch starts again, so the synth retriggers", () => {
+    expect(table({ pitchCycle: [0] }).map((s) => s.notes[0][3])).toEqual([354, 354, 234]);
   });
 
-  it("keeps a tie going across the Cycle boundary", () => {
-    const first = table({ pitchCycle: [0] }, 0);
-    expect(table({ pitchCycle: [0] }, 1, first.carry).slots).toEqual([]);
+  it("looks into the next Cycle for the note after a Cycle's last one", () => {
+    // pitches 60 64 67 | 69 …: the last note runs into a different pitch, legato
+    expect(table({ pitchCycle: [0, 2, 4, 5] }).map((s) => s.notes[0][3])).toEqual([366, 366, 246]);
+    // x.x. with pitches 60 64 | 64 …: the last note is followed by the same pitch, so it retriggers
+    expect(table({ pitchCycle: [0, 2, 2], hits: 2, length: 4 }).map((s) => s.notes[0][3])).toEqual([246, 234]);
   });
 
-  it("ends a carried note that isn't tied before restarting the same pitch", () => {
-    const next = table({ pitchCycle: [0], gate: 50 }, 1, [{ slot: 0, voice: 1, pitch: 60, tie: false }]);
-    expect(at(next.slots, 0)).toEqual([[1, 60, 0], [1, 60, 100]]);
-  });
-});
-
-describe("Replacing the playing Cycle mid-way (a Gate change)", () => {
-  const table = (gate: number, replacing?: CycleTable) => {
-    const engine = createEngine();
-    engine.configure({ lanes: [{ hits: 3, length: 8, rotate: 0, gate, pitchCycle: [0, 2, 4] }] });
-    return engine.cycleTable(0, 2, 0, [], replacing);
-  };
-  const build = (gate: number, replacing?: number) =>
-    table(gate, replacing === undefined ? undefined : table(replacing)).slots;
-  const offs = (slots: { slot: number; notes: number[][] }[]) =>
-    slots.flatMap((s) => s.notes.filter(([, , v]) => v === 0).map(([, pitch]) => [s.slot, pitch]));
-
-  it("keeps the old note-offs of a shortened gate, so a note already sounding still ends", () => {
-    const shorter = build(50, 100);
-    expect(offs(shorter)).toEqual([[30, 60], [180, 60], [210, 64], [360, 64], [390, 67]]);
-  });
-
-  it("keeps old note-offs when a legato gate is shortened", () => {
-    const shorter = build(80, 100);
-    expect(offs(shorter)).toEqual([[120, 60], [180, 60], [300, 64], [360, 64], [444, 67]]);
-  });
-
-  it("doesn't cut a lengthened note at its old, earlier end", () => {
-    expect(build(100, 50)).toEqual(build(100));
-  });
-
-  it("still ends a note whose old note-off was carried into the next Cycle", () => {
-    expect(table(50, table(100)).carry).toEqual([{ slot: 0, voice: 1, pitch: 67, tie: false }]);
-    expect(table(100, table(50)).carry).toEqual([{ slot: 0, voice: 1, pitch: 67, tie: true }]);
+  it("leaves a note that ends well before the next one as the gate makes it", () => {
+    // 80%: half a step (60) plus 60% of the rest of the gap
+    expect(table({ gate: 80, pitchCycle: [0, 2, 4] }).map((s) => s.notes[0][3])).toEqual([240, 240, 168]);
   });
 });
 
 describe("Very short gates", () => {
-  it("still end each note at least one grid slot after it starts", () => {
+  it("still last at least one grid slot", () => {
     const engine = createEngine();
     engine.configure({ lanes: [{ hits: 1, length: 1, rotate: 0, rate: "1/32Q", gate: 1 }] });
-    expect(engine.cycleTable(0, 2, 0).slots).toEqual([
-      { slot: 0, notes: [[1, 60, 100]] },
-      { slot: 1, notes: [[1, 60, 0]] },
-    ]);
-  });
-});
-
-describe("Carried note-offs and Resets", () => {
-  it("carries a note-off on again when a Reset cuts the Cycle short before it's due", () => {
-    const engine = createEngine();
-    // x...x...x... is 1440 ticks; a Reset every bar cuts every second Cycle to 480 ticks (240 slots)
-    engine.configure({ lanes: [{ hits: 3, length: 12, rotate: 0 }], resetBars: 1 });
-    const { carry } = engine.cycleTable(0, 2, 1, [{ slot: 300, voice: 1, pitch: 50, tie: false }]);
-    expect(carry).toContainEqual({ slot: 60, voice: 1, pitch: 50, tie: false });
+    expect(engine.slotTable(0, 2, 0)).toEqual([{ slot: 0, notes: [[1, 60, 100, 2]] }]);
   });
 });
 

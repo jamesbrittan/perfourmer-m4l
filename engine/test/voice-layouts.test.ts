@@ -173,7 +173,6 @@ describe("Changing the Voice Layout while playing", () => {
     engine.setVoice(0, 3, true, 200);
     expect(engine.renderCycle(0, 0).map((e) => e.voice)).toEqual([1, 1]);
     expect(engine.renderCycle(0, 1).map((e) => e.voice)).toEqual([1, 2, 3, 1, 2, 3]);
-    expect(engine.releaseVoices(1)).toEqual([2]);
   });
 
   it("ends notes still sounding at the change", () => {
@@ -184,15 +183,12 @@ describe("Changing the Voice Layout while playing", () => {
     expect(engine.renderCycle(0, 0)).toEqual([{ onset: 0, duration: 1440, pitch: 60, velocity: 100, voice: 1 }]);
   });
 
-  it("releases the Voices a Lane gave up, as well as its new ones, until the change has landed", () => {
+  it("forgets the layout a change replaced once the bar it landed on has played", () => {
     const engine = playing();
     engine.setVoice(0, 2, true, 100);
-    expect(engine.releaseVoices(0)).toEqual([1, 2]);
-    expect(engine.releaseVoices(1)).toEqual([2]);
     expect(engine.retireVoiceLayout(1920)).toBe(false); // the bar it lands on is still playing notes from before
     expect(engine.retireVoiceLayout(3840)).toBe(true);
     expect(engine.retireVoiceLayout(3840)).toBe(false);
-    expect(engine.releaseVoices(1)).toEqual([]);
     expect(engine.renderCycle(0, 0).map((e) => e.voice)).toEqual([1, 2, 1, 2]); // jumping back hears the new layout
   });
 });
@@ -203,6 +199,5 @@ describe("Changing the Voice Layout while stopped", () => {
     engine.setVoice(0, 2, true);
     expect(engine.renderCycle(0, 0).map((e) => e.voice)).toEqual([1, 2, 1, 2]);
     expect(engine.renderCycle(1, 0)).toEqual([]);
-    expect(engine.releaseVoices(1)).toEqual([]);
   });
 });

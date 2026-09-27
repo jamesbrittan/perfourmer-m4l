@@ -43,7 +43,7 @@ describe("Player grid for off-grid rates", () => {
     const engine = createEngine();
     engine.configure({ lanes: [{ hits: 7, length: 7, rotate: 0, rate: "1/16S" }] });
     const onsets = engine.renderCycle(0, 0).map((e) => e.onset);
-    const noteOnSlots = engine.slotTable(0, 2).filter((s) => s.notes.some(([, , velocity]) => velocity > 0));
+    const noteOnSlots = engine.slotTable(0, 2);
     expect(noteOnSlots).toHaveLength(7);
     noteOnSlots.forEach(({ slot }, i) => {
       expect(onsets[i] - slot * 2).toBeGreaterThanOrEqual(0);
@@ -53,12 +53,12 @@ describe("Player grid for off-grid rates", () => {
 
   it("only uses slots the player reaches in every Cycle, even when a Cycle isn't a whole number of slots", () => {
     // one septuplet step = 68.57 ticks. The player's ticks can start a Cycle up to one slot late, so it may
-    // reach no further than slot 33; a note-off due later is carried into the next Cycle instead
+    // reach no further than slot 33 of a 7-step Cycle
     const engine = createEngine();
-    engine.configure({ lanes: [{ hits: 1, length: 1, rotate: 0, rate: "1/16S", gate: 100 }] });
-    const { slots, carry } = engine.cycleTable(0, 2, 0);
-    expect(Math.max(...slots.map((s) => s.slot))).toBeLessThanOrEqual(33);
-    expect(carry).toEqual([{ slot: 0, voice: 1, pitch: 60, tie: true }]); // 100% = tied into the next hit
+    engine.configure({ lanes: [{ hits: 7, length: 7, rotate: 0, rate: "1/16S" }] });
+    const slots = engine.slotTable(0, 2, 0).map((s) => s.slot);
+    expect(Math.max(...slots)).toBeLessThanOrEqual(238);
+    expect(new Set(slots).size).toBe(7);
   });
 });
 
