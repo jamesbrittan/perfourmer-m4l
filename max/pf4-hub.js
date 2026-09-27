@@ -6,22 +6,21 @@
 // triggers the render of the Cycle after it; while stopped, the playing bank is kept on the Cycle at the song
 // position, so playback can start anywhere.
 // A Gate or Velocity change can't wait for the boundary: the playing Cycle is re-rendered into the other bank and
-// offered "now", and the player switches at its next tick. Note-offs are handed on between tables (past a Cycle's
-// end, and from a replaced table), so notes still end wherever the switch lands.
+// offered "now", and the player switches at its next tick. The tables only hold note starts, each with its length:
+// the Voice devices end every note themselves (makenote), so a switch never leaves a note without its end.
 // Our messages from the player arrive late (v8 is low priority), so a render never trusts them to know which bank
 // is playing: it withdraws the pending offer (after which the player can't switch) and reads the dict.
 autowatch = 1;
 inlets = 1;
-outlets = 14; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now> <release>" pending (bank -1 = withdrawn; now 1 =
-// switch at the next tick rather than the next Cycle boundary; release 1 = release the Lane's Voice on switching),
+outlets = 13; // 0: table edits, 1: "<lane> <bank> <cycleTicks> <now>" pending (bank -1 = withdrawn; now 1 =
+// switch at the next tick rather than the next Cycle boundary),
 // 2: Voice status text,
 // 3: Reset period in ticks for the player (NEVER when off), 4: "<lane> set <text>" position readouts (lanes 4–7: Base readouts),
 // 5: transport running (1) / stopped (0), 6: "set <text>" Scale readout, 7: Captured Bases as numbers (to the
 // stored-only pattr that saves them with the set), 8: "<lane> set <text>" pattern view,
 // 9: "<lane> <hits> <rotate> <length>" to set a Lane's dials from a Rhythm Preset, 10: "<lane> set 0" to show the
 // Rhythm Preset menu as "—" once the dials no longer match the preset, 11: "<lane> set <text>" the Lane's Voices,
-// 12: "<lane> <voice> …" the Voices the player releases for that Lane (current and, during a Voice Layout change,
-// previous), 13: scripting messages to thispatcher (Voicing Matrix buttons, enabling the Lane's controls)
+// 12: scripting messages to thispatcher (Voicing Matrix buttons, enabling the Lane's controls)
 
 const { createEngine, RATES, RHYTHM_PRESETS, GROUP_MODES, CHORD_SHAPES } = require("pf4-engine.js");
 
@@ -47,10 +46,6 @@ const song = {
 };
 const writtenKeys = params.map(() => [[], []]);
 const bankCycle = params.map(() => [0, 0]); // the Cycle each bank holds
-const EMPTY = { slots: [], carry: [] };
-const bankTable = params.map(() => [EMPTY, EMPTY]); // what each bank holds, and the note-offs it hands on
-const bankCarried = params.map(() => [[], []]); // the note-offs each bank took over from the Cycle before it
-const bankFrame = params.map(() => ["", ""]); // Cycle length and Reset period each bank was rendered for
 const offered = params.map(() => -1); // the bank last offered to the player as pending
 const adoptedAt = params.map(() => null); // song position of each Lane's last adoption while running
 let polledAt = 0; // song position at the last poll
@@ -151,7 +146,7 @@ function voice(n, v, state) {
   for (let m = 0; m < LANES; m++)
     for (let w = 1; w <= 4; w++) {
       const on = engine.laneVoices(m).includes(w);
-      if (m !== Number(n) && on !== before[m].includes(w)) outlet(13, "script", "send", `btn_L${m + 1}_V${w}`, on ? 1 : 0);
+      if (m !== Number(n) && on !== before[m].includes(w)) outlet(12, "script", "send", `btn_L${m + 1}_V${w}`, on ? 1 : 0);
     }
   for (let m = 0; m < LANES; m++) {
     if (playing) render(m, null, true);
@@ -172,19 +167,19 @@ function updateMatrixActiveStates() {
     const chordName = `menu_L${n + 1}_chord`;
 
     // Send active state to object inlet (visual dimming)
-    outlet(13, "script", "send", gmName, "active", gmActive);
-    outlet(13, "script", "send", chordName, "active", chordActive);
+    outlet(12, "script", "send", gmName, "active", gmActive);
+    outlet(12, "script", "send", chordName, "active", chordActive);
 
     // Send ignoreclick attribute to box (strictly disables mouse clicks)
-    outlet(13, "script", "sendbox", gmName, "ignoreclick", gmActive ? 0 : 1);
-    outlet(13, "script", "sendbox", chordName, "ignoreclick", chordActive ? 0 : 1);
+    outlet(12, "script", "sendbox", gmName, "ignoreclick", gmActive ? 0 : 1);
+    outlet(12, "script", "sendbox", chordName, "ignoreclick", chordActive ? 0 : 1);
 
     // Rhythm view: grey out (active 0) if count === 0, but keep clickable (no ignoreclick)
-    outlet(13, "script", "send", `dial_L${n + 1}_hits`, "active", gmActive);
-    outlet(13, "script", "send", `dial_L${n + 1}_len`, "active", gmActive);
-    outlet(13, "script", "send", `dial_L${n + 1}_rot`, "active", gmActive);
-    outlet(13, "script", "send", `dial_L${n + 1}_rate`, "active", gmActive);
-    outlet(13, "script", "send", `menu_L${n + 1}_rhythm`, "active", gmActive);
+    outlet(12, "script", "send", `dial_L${n + 1}_hits`, "active", gmActive);
+    outlet(12, "script", "send", `dial_L${n + 1}_len`, "active", gmActive);
+    outlet(12, "script", "send", `dial_L${n + 1}_rot`, "active", gmActive);
+    outlet(12, "script", "send", `dial_L${n + 1}_rate`, "active", gmActive);
+    outlet(12, "script", "send", `menu_L${n + 1}_rhythm`, "active", gmActive);
 
     // Direct JS patcher access if available
     if (typeof this !== "undefined" && this.patcher && this.patcher.getnamed) {
@@ -216,7 +211,6 @@ function group(n, modeIndex, shapeIndex) {
 
 function showLaneVoices() {
   for (let n = 0; n < LANES; n++) {
-    outlet(12, n, ...engine.releaseVoices(n));
     const voices = engine.laneVoices(n);
     const mode = voices.length > 1 ? ` ${params[n].groupMode || "poly"}` : "";
     const text = !voices.length ? "off" : voices.length === 1 ? `V${voices[0]}` : `V${voices.join("+")}${mode}`;
@@ -273,7 +267,7 @@ function transportRunning(isPlaying) {
   if (!playing) {
     // withdraw anything offered for the next Cycle: stopped, the playing bank is kept on the song position instead
     for (let n = 0; n < LANES; n++) {
-      outlet(1, n, -1, 0, 0, 0);
+      outlet(1, n, -1, 0, 0);
       offered[n] = -1;
     }
     return;
@@ -351,35 +345,22 @@ function bang() {
 // now: replace the playing Cycle from the player's next tick, instead of waiting for its next Cycle boundary
 // (cycleIndex null = the Cycle the playing bank holds, as read once the player can no longer switch)
 function render(n, cycleIndex, now = false) {
-  outlet(1, n, -1, 0, 0, 0); // withdraw the pending offer: from here on the player stays on its bank
+  outlet(1, n, -1, 0, 0); // withdraw the pending offer: from here on the player stays on its bank
   offered[n] = -1;
   const playingNow = playingBank(n);
   if (cycleIndex === null) cycleIndex = bankCycle[n][playingNow];
   const bank = 1 - playingNow;
   engine.configure({ lanes: params, ...song });
-  // note-offs handed on. Running, whatever is offered follows the playing Cycle in time (even when a Length or Rate
-  // change has renumbered the Cycles), so it takes that Cycle's carried note-offs; a "now" replacement takes over
-  // the ones the playing Cycle took over, plus everything it would have sent. Stopped, nothing is sounding.
-  // If the Cycle length or Reset period changed, the old note-off positions mean nothing in the new table: the
-  // player releases the Voice as it switches instead.
-  const frame = `${engine.cycleTicks(n)}/${song.resetBars * song.ticksPerBar}`;
-  const release = playing && frame !== bankFrame[n][playingNow];
-  const handOn = playing && !release;
-  const carried = !handOn ? [] : now ? bankCarried[n][playingNow] : bankTable[n][playingNow].carry;
-  const table = engine.cycleTable(n, GRID_TICKS, cycleIndex, carried, handOn && now ? bankTable[n][playingNow] : EMPTY);
   for (const key of writtenKeys[n][bank]) outlet(0, "remove", key);
-  writtenKeys[n][bank] = table.slots.map(({ slot, notes }) => {
+  writtenKeys[n][bank] = engine.slotTable(n, GRID_TICKS, cycleIndex).map(({ slot, notes }) => {
     const key = (n * 2 + bank) * BANK_SIZE + slot;
     outlet(0, [key].concat(...notes));
     return key;
   });
   bankCycle[n][bank] = cycleIndex;
-  bankTable[n][bank] = table;
-  bankCarried[n][bank] = carried;
-  bankFrame[n][bank] = frame;
   offered[n] = bank;
   // while stopped the player adopts this at once (re-entering adopt)
-  outlet(1, n, bank, engine.cycleTicks(n), now && playing ? 1 : 0, release ? 1 : 0);
+  outlet(1, n, bank, engine.cycleTicks(n), now && playing ? 1 : 0);
 }
 
 // Keep a Lane's banks on the polled song position (cycleIndex = the Cycle there). Stopped, the player should hold
@@ -399,7 +380,7 @@ function follow(n, cycleIndex) {
 // song position (polled a few times a second): show where each Lane is, from the engine's own locate()
 function where(songTicks) {
   polledAt = songTicks;
-  if (playing && engine.retireVoiceLayout(songTicks)) showLaneVoices();
+  if (playing) engine.retireVoiceLayout(songTicks);
   for (let n = 0; n < LANES; n++) {
     const { cycleIndex, offsetTicks } = engine.locate(n, songTicks);
     follow(n, cycleIndex);
