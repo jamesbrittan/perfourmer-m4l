@@ -109,6 +109,8 @@ HELP = {
                       "on Push."),
     "readout:Waiting": ("Voices found", "The Voice devices found in the rack after the Hub, and any missing or "
                         "duplicated Voice numbers."),
+    "readout:Coprime": ("True Euclidean rhythm", "Shown when Hits and Length are coprime (relatively prime): the "
+                       "rhythm cannot be divided into repeating sub-cycles and has optimal Euclidean evenness."),
     "readout:pattern": ("Pattern", "The Lane's current Cycle as it plays: ● hit, · rest; the playhead is the cyan ◉ (a hit) or ○ (a rest)."),
     "readout:voices": ("Lane Voices", "Which Voices this Lane drives, and how (see Voices and Group Mode)."),
     "readout:setup": ("Perfourmer setup", "Set the Perfourmer once: Play Mode M1, synth channels 1–4 on MIDI "
@@ -141,7 +143,8 @@ def info_for(box):
     if box["maxclass"] not in ("comment", "message"):
         return None
     for start, key in (("Cycle ", "readout:Cycle"), ("Scale:", "readout:Scale"), ("Waiting for Voices", "readout:Waiting"),
-                       ("Perfourmer setup", "readout:setup"), ("Base:", "readout:Base")):
+                       ("Perfourmer setup", "readout:setup"), ("Base:", "readout:Base"), ("Euclidean", "readout:Base"),
+                       ("Coprime", "readout:Coprime"), ("coprime", "readout:Coprime")):
         if text.startswith(start):
             return HELP[key]
     if text and set(text) <= set("·●◉○ \u00a0\n"):  # a pattern view or its playhead overlay
@@ -416,7 +419,7 @@ def build_hub():
     poll = P.obj("metro 100 @active 1", 1300, Y, ins=2)
     poll_pos = P.obj("transport", 1300, Y + 30, ins=2, outs=9)
     where = P.obj("prepend where", 1300, Y + 60)
-    readouts = P.obj("route " + " ".join(str(n) for n in range(2 * LANES)), 1300, Y + 90, ins=2, outs=2 * LANES + 1)  # 0–3 positions, 4–7 Bases
+    readouts = P.obj("route " + " ".join(str(n) for n in range(3 * LANES)), 1300, Y + 90, ins=2, outs=3 * LANES + 1)  # 0–3 positions, 4–7 Bases, 8–11 Coprime badges
     P.c(poll, poll_pos); P.c(poll_pos, where, 7); P.c(where, adapter); P.c(adapter, readouts, OUT["readouts"])
     P.c(load, adapter)                               # render every Lane once
 
@@ -506,7 +509,10 @@ def build_hub():
 
         # --- Tab 0: Rhythm (4 columns side-by-side, 90px each)
         rx = 285 + 90 * n
-        P.comment(f"Lane {n + 1}", rx, 26, 60, tab=0)
+        P.comment(f"Lane {n + 1}", rx, 26, 44, tab=0)
+        coprime_badge = P.add("comment", rx + 44, 26, w=44, h=14, text="", fontsize=8.5,
+                              textcolor=[0.6, 0.6, 0.6, 1.0], ins=1, outs=0, tab=0)
+        P.c(readouts, coprime_badge, 2 * LANES + n)
         hits = P.param("live.dial", f"L{n + 1} Hits", rx, 42, *R["hits"], hits_d, short="Hits", tab=0,
                        varname=name("hits", n + 1))
         length = P.param("live.dial", f"L{n + 1} Length", rx + 44, 42, *R["length"], len_d, short="Length", tab=0,

@@ -41,7 +41,9 @@ __export(index_exports, {
   controlName: () => controlName,
   createEngine: () => createEngine,
   createScheduler: () => createScheduler,
+  gcd: () => gcd,
   inRange: () => inRange,
+  isCoprime: () => isCoprime,
   randomSettings: () => randomSettings
 });
 module.exports = __toCommonJS(index_exports);
@@ -305,6 +307,19 @@ var CONTROL_NAMES = {
 };
 var controlName = (kind, lane, voice = 0) => CONTROL_NAMES[kind].replace("{lane}", String(lane)).replace("{voice}", String(voice));
 var clamp = (value, [lo, hi]) => Math.max(lo, Math.min(hi, value));
+function gcd(a, b) {
+  a = Math.abs(Math.round(a));
+  b = Math.abs(Math.round(b));
+  while (b) {
+    const t = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+function isCoprime(hits, length) {
+  return hits > 0 && hits < length && gcd(hits, length) === 1;
+}
 function inRange(lane) {
   const out = { ...lane };
   for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "seed"])
@@ -775,16 +790,19 @@ function createEngine() {
       const key = `${cycleIndex}|${resetTicks}|${basesChanged}|${JSON.stringify(lanes[lane])}`;
       const cached = views.get(lane);
       if (cached?.key === key) return { ...cached.view, step };
+      const { length, hits } = lanes[lane];
+      const coprime = isCoprime(hits, length);
       const heard = cycleHits(lane, cycleIndex);
       const onsets = new Set(heard.map((h) => Math.round(h.onset / stepTicks(lane))));
-      const steps = Array.from({ length: lanes[lane].length }, (_, i) => onsets.has(i));
+      const steps = Array.from({ length }, (_, i) => onsets.has(i));
       const rows = [];
       for (let i = 0; i < steps.length; i += VIEW_ROW) rows.push(steps.slice(i, i + VIEW_ROW));
       const view = {
         cycleIndex,
         rows,
         mutated: JSON.stringify(heard) !== JSON.stringify(cycleHits(lane, cycleIndex, false)),
-        captureDepth: active(lane)?.stack.length ?? 0
+        captureDepth: active(lane)?.stack.length ?? 0,
+        coprime
       };
       views.set(lane, { key, view });
       return { ...view, step };
