@@ -107,7 +107,7 @@ function articulate(n, gate, velocity, accent) {
 
 // Probability %, Mutation 0–127, Seed: from the next Cycle
 function evolve(n, probability, mutation, seed) {
-  engine.setLane(n, { probability, mutation, seed });
+  engine.setLane(n, { probability, mutation, seed: seed !== undefined ? Math.round(seed) : undefined });
   refresh(n);
 }
 

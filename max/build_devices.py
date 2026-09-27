@@ -204,9 +204,19 @@ class Patch:
         return self.add("comment", x, y, w=w, h=h, text=text, ins=1, outs=0, tab=tab, **kw)
 
     def param(self, maxclass, name, x, y, lo, hi, initial, w=44, h=48, short=None, enum=None, stored_only=False, tab=None, **extra):
-        valueof = {"parameter_longname": name, "parameter_shortname": short or name,
-                   "parameter_type": 1, "parameter_mmin": lo, "parameter_mmax": hi,
-                   "parameter_initial": [initial], "parameter_initial_enable": 1}
+        span = hi - lo
+        # Ableton Live restricts parameter_type: 1 (Int) to an 8-bit span of 255 values (0..255).
+        # For integer parameters with span > 255 (e.g. Seed 0..999), Cycling '74's standard
+        # pattern is parameter_type: 0 (Float) with parameter_unitstyle: 0 (Int) and parameter_steps: span + 1.
+        if span > 255 and not enum and maxclass != "live.text":
+            valueof = {"parameter_longname": name, "parameter_shortname": short or name,
+                       "parameter_type": 0, "parameter_unitstyle": 0, "parameter_steps": span + 1,
+                       "parameter_mmin": float(lo), "parameter_mmax": float(hi),
+                       "parameter_initial": [float(initial)], "parameter_initial_enable": 1}
+        else:
+            valueof = {"parameter_longname": name, "parameter_shortname": short or name,
+                       "parameter_type": 1, "parameter_mmin": lo, "parameter_mmax": hi,
+                       "parameter_initial": [initial], "parameter_initial_enable": 1}
         if stored_only:  # saved with the set, but not automatable or mappable
             valueof["parameter_invisible"] = 1
         if enum:  # named choices, e.g. rates; the object outputs the choice's index
