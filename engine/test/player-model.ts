@@ -2,8 +2,9 @@ import { createEngine, createScheduler, LANE_DEFAULTS, LANES, PLAYER, SPLITS, ty
 
 /**
  * A model of the Hub's native player, driven by the scheduler as the Hub drives it: it plays the two banks per Lane
- * from its table, adopts pending banks at Cycle boundaries (or at the next tick for a "now" offer), and releases a
- * Lane's Voices when told to or when it misses a boundary. Its reports and control edits reach the scheduler
+ * from its table, adopts pending banks at Cycle boundaries (or at the next tick for a "now" offer), and plays each note
+ * as the Voice devices' makenote does: its note-off follows after its length, and a stop ends every note at once.
+ * Its reports and control edits reach the scheduler
  * `latency` ticks late, as they do from Max's low-priority script thread, and song position polls later still (they
  * pass through more of the patch). It plays adversarially: it takes up a pending offer the moment the scheduler starts
  * writing to its table, as if its Cycle boundary came part-way through the render.
@@ -76,12 +77,13 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
   const resetTicks = resetBars ? resetBars * TICKS_PER_BAR : 1e12;
   const table = new Map<number, number[]>();
   const noted: (number | undefined)[] = []; // the bank each Lane's player notes it's playing
-  type Pending = { bank: number; ticks: number; now: boolean; release: boolean };
-  const none: Pending = { bank: -1, ticks: 0, now: false, release: false };
+  type Pending = { bank: number; ticks: number; now: boolean };
+  const none: Pending = { bank: -1, ticks: 0, now: false };
   const pending: Pending[] = Array.from({ length: LANES }, () => none);
   const player = Array.from({ length: LANES }, () => ({ bank: -1, cycleTicks: 1, last: Infinity }));
   const stream: Note[][] = Array.from({ length: LANES }, () => []);
-  const held = Array.from({ length: LANES }, () => new Set<number>());
+  // each Voice device's makenote: the note-offs it will send, as [due tick, id]
+  const ending: [number, number][][] = Array.from({ length: LANES }, () => []);
   let running = false;
   let curTick = 0;
   let clock = 0;
@@ -101,8 +103,8 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
     playingBank: (n) => noted[n],
     send(command) {
       if (command.type === "offer") {
-        const { lane, bank, cycleTicks, now, release } = command;
-        pending[lane] = { bank, ticks: cycleTicks, now, release };
+        const { lane, bank, cycleTicks, now } = command;
+        pending[lane] = { bank, ticks: cycleTicks, now };
         if (bank >= 0 && !running) adopt(lane, true);
         return;
       }
@@ -115,17 +117,15 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
   });
   const controls = hub(engine, scheduler);
 
-  const release = (n: number, voices: readonly number[]) => {
-    for (const id of [...held[n]])
-      if (voices.includes(Math.floor(id / 1000))) {
-        stream[n].push([curTick, id, 0]);
-        held[n].delete(id);
-      }
+  /** makenote ends the notes due by `tick` (all of them on "stop"). */
+  const endNotes = (n: number, tick: number) => {
+    const due = ending[n].filter(([at]) => at <= tick).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    ending[n] = ending[n].filter(([at]) => at > tick);
+    for (const [, id] of due) stream[n].push([curTick, id, 0]);
   };
   function adopt(n: number, sync = false) {
     const p = pending[n];
     if (p.bank < 0) return;
-    if (p.release) release(n, engine.releaseVoices(n));
     Object.assign(player[n], { bank: p.bank, cycleTicks: p.ticks });
     noted[n] = p.bank;
     pending[n] = none;
@@ -164,30 +164,26 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
       if ((tick - start) % pollEvery === 0) later(() => poll(tick), 2 * latency + 20);
       const contiguous = tick - previous > 0 && tick - previous <= 16;
       previous = tick;
-      if (!contiguous) for (let n = 0; n < LANES; n++) release(n, [1, 2, 3, 4, 5, 6, 7, 8]); // the player jumped
       for (let n = 0; n < LANES; n++) {
         const pl = player[n];
+        endNotes(n, tick);
         if (pending[n].now) adopt(n);
         const pos = (tick % resetTicks) % pl.cycleTicks;
-        if (pos < pl.last && contiguous) {
-          if (pending[n].bank < 0) release(n, engine.releaseVoices(n)); // missed a boundary
-          adopt(n);
-        }
+        if (pos < pl.last && contiguous) adopt(n);
         const at = (tick % resetTicks) % player[n].cycleTicks;
         pl.last = at;
         const m = table.get((n * 2 + pl.bank) * BANK + Math.floor(at / GRID)) ?? [];
-        for (let k = 0; k < m.length; k += 3) {
+        for (let k = 0; k < m.length; k += 4) {
           const id = m[k] * 1000 + m[k + 1];
           stream[n].push([tick, id, m[k + 2]]);
-          if (m[k + 2] > 0) held[n].add(id);
-          else held[n].delete(id);
+          ending[n].push([tick + m[k + 3], id]);
         }
       }
     }
     if (play[i + 1]?.jump) return;
-    // transport stop: the player releases everything it holds
+    // transport stop: the Hub tells each Voice's makenote to end every note it holds
     curTick = start + ticks;
-    for (let n = 0; n < LANES; n++) release(n, [1, 2, 3, 4, 5, 6, 7, 8]);
+    for (let n = 0; n < LANES; n++) endNotes(n, Infinity);
     running = false;
     scheduler.transport(false);
     for (const p of player) p.last = Infinity;
@@ -209,9 +205,10 @@ export function simulate({ play, resetBars = 0, latency = 10, pollEvery = 100, s
   return { stream, clobbers, engine, lanes, heldAt };
 }
 
-/** What the engine says each Voice should receive between two song ticks, chaining carried note-offs from Cycle
- * to Cycle, for the settings a simulation ended with. */
-export function expected(sim: ReturnType<typeof simulate>, from: number, to: number): Note[][] {
+/** What the engine says each Voice should receive between two song ticks, for the settings a simulation ended with:
+ * each note's start, and its end after its length (makenote's note-off, heard on the first tick at or after it).
+ * startedFrom: only notes starting from `from` (after a stop, which ended the notes playing before it). */
+export function expected(sim: ReturnType<typeof simulate>, from: number, to: number, startedFrom = false): Note[][] {
   const params = sim.lanes();
   const { resetBars } = sim.engine.songSettings();
   const e = createEngine();
@@ -221,9 +218,8 @@ export function expected(sim: ReturnType<typeof simulate>, from: number, to: num
   return params.map((_, n) => {
     const out: Note[] = [];
     let c = Math.max(0, e.locate(n, from).cycleIndex - 2);
-    let carry: ReturnType<typeof e.cycleTable>["carry"] = [];
     for (;;) {
-      const { slots, carry: next } = e.cycleTable(n, GRID, c, carry);
+      const slots = e.slotTable(n, GRID, c);
       const perPeriod = resetBars ? Math.ceil(resetTicks / e.cycleTicks(n)) : Infinity;
       const start = resetBars
         ? Math.floor(c / perPeriod) * resetTicks + (c % perPeriod) * e.cycleTicks(n)
@@ -232,14 +228,21 @@ export function expected(sim: ReturnType<typeof simulate>, from: number, to: num
       for (const { slot, notes } of slots) {
         // the player samples even ticks and reads slot floor(position / 2): slot s is read on the first tick at or after it
         const tick = GRID * Math.ceil((start + slot * GRID) / GRID - 1e-9);
-        if (tick >= from && tick < to) for (const [voice, p, v] of notes) out.push([tick, voice * 1000 + p, v]);
+        for (const [voice, p, v, length] of notes) {
+          const id = voice * 1000 + p;
+          const end = GRID * Math.ceil((tick + length) / GRID - 1e-9);
+          if (tick >= from && tick < to) out.push([tick, id, v]);
+          if (end >= from && end < to && (!startedFrom || tick >= from)) out.push([end, id, 0]);
+        }
       }
-      carry = next;
       c++;
     }
-    return out.sort((a, b) => a[0] - b[0]);
+    return inOrder(out);
   });
 }
 
+/** Within a tick, note-offs first (makenote's timers run before the player's tick), then by note. */
+const inOrder = (notes: Note[]) => [...notes].sort((a, b) => a[0] - b[0] || Number(a[2] > 0) - Number(b[2] > 0) || a[1] - b[1]);
+
 export const between = (sim: ReturnType<typeof simulate>, from: number, to: number) =>
-  sim.stream.map((notes) => notes.filter(([t]) => t >= from && t < to));
+  sim.stream.map((notes) => inOrder(notes.filter(([t]) => t >= from && t < to)));

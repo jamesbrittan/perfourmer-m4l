@@ -70,14 +70,12 @@ describe("Euclidean Lane", () => {
     expect(engine.cycleTicks(1)).toBe(1560);
   });
 
-  it("lays out a Cycle as note-ons and note-offs in the player's grid slots", () => {
+  it("lays out a Cycle as notes with their lengths in the player's grid slots", () => {
     const engine = createEngine();
     engine.configure({ lanes: [{ hits: 2, length: 4, rotate: 0 }] });
     expect(engine.slotTable(0, 2)).toEqual([
-      { slot: 0, notes: [[1, 60, 100]] },
-      { slot: 30, notes: [[1, 60, 0]] },
-      { slot: 120, notes: [[1, 60, 100]] },
-      { slot: 150, notes: [[1, 60, 0]] },
+      { slot: 0, notes: [[1, 60, 100, 60]] },
+      { slot: 120, notes: [[1, 60, 100, 60]] },
     ]);
   });
 });

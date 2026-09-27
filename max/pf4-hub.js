@@ -35,8 +35,8 @@ const scheduler = createScheduler({
     if (command.type === "write") outlet(OUT.table, [command.key].concat(...command.notes));
     else if (command.type === "remove") outlet(OUT.table, "remove", command.key);
     else {
-      const { lane, bank, cycleTicks, now, release } = command;
-      outlet(OUT.pending, lane, bank, cycleTicks, now ? 1 : 0, release ? 1 : 0); // while stopped the player adopts at once
+      const { lane, bank, cycleTicks, now } = command;
+      outlet(OUT.pending, lane, bank, cycleTicks, now ? 1 : 0); // while stopped the player adopts at once
     }
   },
 });
@@ -178,7 +178,6 @@ function group(n, modeIndex, shapeIndex) {
 
 function showLaneVoices() {
   for (let n = 0; n < LANES; n++) {
-    outlet(OUT.releaseVoices, n, ...engine.releaseVoices(n));
     const voices = engine.laneVoices(n);
     const mode = voices.length > 1 ? ` ${engine.laneSettings(n).groupMode || "poly"}` : "";
     const text = !voices.length ? "off" : voices.length === 1 ? `V${voices[0]}` : `V${voices.join("+")}${mode}`;
@@ -282,7 +281,7 @@ function bang() {
 
 // song position (polled a few times a second): show where each Lane is, from the engine's own locate()
 function where(songTicks) {
-  if (scheduler.playing && engine.retireVoiceLayout(songTicks)) showLaneVoices();
+  if (scheduler.playing) engine.retireVoiceLayout(songTicks);
   scheduler.poll(songTicks);
   for (let n = 0; n < LANES; n++) {
     const { cycleIndex, step, rows, mutated, captureDepth } = engine.laneView(n, songTicks);

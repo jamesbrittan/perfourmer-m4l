@@ -60,7 +60,7 @@ export const LANE_DEFAULTS: LaneParams[] = [
 /** The Hub script's outlets, by what they carry. */
 export const HUB_OUTLETS = {
   table: 0, // player table edits
-  pending: 1, // "<lane> <bank> <cycleTicks> <now> <release>" offers
+  pending: 1, // "<lane> <bank> <cycleTicks> <now>" offers
   voiceStatus: 2,
   resetPeriod: 3, // in ticks, PLAYER.noReset when off
   readouts: 4, // "<lane> set <text>": 0–3 positions, 4–7 Bases
@@ -71,8 +71,7 @@ export const HUB_OUTLETS = {
   presetDials: 9, // "<lane> <hits> <rotate> <length>" from a Rhythm Preset
   presetMenus: 10, // "<lane> set 0": the Rhythm Preset menu back to "—"
   laneVoices: 11, // "<lane> set <text>"
-  releaseVoices: 12, // "<lane> <voice> …" the Voices the player releases for that Lane
-  script: 13, // scripting messages to thispatcher
+  script: 12, // scripting messages to thispatcher
 } as const;
 
 /** Scripting names of the controls the Hub script addresses ({lane} and {voice} count from 1). */
