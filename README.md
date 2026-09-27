@@ -117,9 +117,8 @@ Timing reliability is paramount in hardware sequencing:
    # Run engine test suite
    npm test --prefix engine
 
-   # Run timing & state simulation checks
-   node .scratch/sim/check.js
-   node .scratch/sim/capture-check.js
+   # Type-check TypeScript sources
+   npm run typecheck --prefix engine
    ```
 
 3. **Build the Engine & Devices**:
