@@ -60,7 +60,7 @@ export const LANE_DEFAULTS: LaneParams[] = [
 /** The Hub script's outlets, by what they carry. */
 export const HUB_OUTLETS = {
   table: 0, // player table edits
-  pending: 1, // "<lane> <bank> <cycleTicks> <now> <release>" offers
+  pending: 1, // "<lane> <bank> <cycleTicks> <now>" offers
   voiceStatus: 2,
   resetPeriod: 3, // in ticks, PLAYER.noReset when off
   readouts: 4, // "<lane> set <text>": 0–3 positions, 4–7 Bases
@@ -71,9 +71,8 @@ export const HUB_OUTLETS = {
   presetDials: 9, // "<lane> <hits> <rotate> <length>" from a Rhythm Preset
   presetMenus: 10, // "<lane> set 0": the Rhythm Preset menu back to "—"
   laneVoices: 11, // "<lane> set <text>"
-  releaseVoices: 12, // "<lane> <voice> …" the Voices the player releases for that Lane
-  script: 13, // scripting messages to thispatcher
-  frozen: 14, // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
+  script: 12, // scripting messages to thispatcher
+  frozen: 13, // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
 } as const;
 
 /** How a Lane's Freeze is stored with the set: off, holding its Base (after a Capture while frozen), or the Cycle. */
