@@ -1,4 +1,4 @@
-import type { Carry, CycleTable, createEngine } from "./index";
+import type { createEngine } from "./index";
 
 /**
  * What the native player plays next. Timing stays in the player; this only decides what goes in its table.
@@ -9,21 +9,21 @@ import type { Carry, CycleTable, createEngine } from "./index";
  * so while the transport runs each adoption triggers the render of the Cycle after it; while stopped, the playing
  * bank is kept on the Cycle at the song position, so playback can start anywhere.
  * A change that can't wait for the boundary (Gate, Velocity, the Voice Layout) re-renders the playing Cycle into the
- * other bank and offers it "now": the player switches at its next tick. Note-offs are handed on between tables (past
- * a Cycle's end, and from a replaced table), so notes still end wherever the switch lands.
+ * other bank and offers it "now": the player switches at its next tick. The tables hold note starts only, each with
+ * its length (the Voice devices end every note themselves), so a switch can never leave a note without its end.
  * Reports from the player arrive late (the script runs at low priority), so a render never trusts them to know which
  * bank is playing: it withdraws the pending offer (after which the player can't switch) and reads `playingBank`.
  */
 export type PlayerCommand =
-  /** Put a slot's [voice, pitch, velocity] messages in the player's table (velocity 0 = note-off). */
-  | { type: "write"; key: number; notes: [number, number, number][] }
+  /** Put the notes starting in a slot in the player's table, as [voice, pitch, velocity, length in ticks]. */
+  | { type: "write"; key: number; notes: [number, number, number, number][] }
   | { type: "remove"; key: number }
   /** Offer a bank for the Lane's next Cycle boundary (bank -1 = withdraw the offer). now: switch at the next tick
-   * instead; release: release the Lane's Voices on switching (the old note-off positions mean nothing any more). */
-  | { type: "offer"; lane: number; bank: number; cycleTicks: number; now: boolean; release: boolean };
+   * instead. */
+  | { type: "offer"; lane: number; bank: number; cycleTicks: number; now: boolean };
 
 export type SchedulerOptions = {
-  engine: Pick<ReturnType<typeof createEngine>, "cycleTable" | "cycleTicks" | "locate" | "resetTicks">;
+  engine: Pick<ReturnType<typeof createEngine>, "slotTable" | "cycleTicks" | "locate">;
   lanes: number;
   /** The player's table resolution in ticks: it reads slot floor(position / gridTicks). */
   gridTicks: number;
@@ -35,12 +35,10 @@ export type SchedulerOptions = {
   send: (command: PlayerCommand) => void;
 };
 
-const EMPTY: CycleTable = { slots: [], carry: [] };
-
 export function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: reported, send }: SchedulerOptions) {
-  type Bank = { cycle: number; keys: number[]; table: CycleTable; carried: Carry[]; frame: string };
+  type Bank = { cycle: number; keys: number[] };
   const each = <T>(make: () => T) => Array.from({ length: lanes }, make);
-  const emptyBank = (): Bank => ({ cycle: 0, keys: [], table: EMPTY, carried: [], frame: "" });
+  const emptyBank = (): Bank => ({ cycle: 0, keys: [] });
   const banks = each((): [Bank, Bank] => [emptyBank(), emptyBank()]);
   const offered = each(() => -1); // the bank last offered to the player as pending
   const adoptedAt = each((): number | null => null); // song position of each Lane's last adoption while running
@@ -58,7 +56,7 @@ export function createScheduler({ engine, lanes, gridTicks, bankSize, playingBan
     offered[n] !== -1 && offered[n] !== playingBank(n) ? banks[n][offered[n]].cycle : null;
 
   function withdraw(n: number) {
-    send({ type: "offer", lane: n, bank: -1, cycleTicks: 0, now: false, release: false });
+    send({ type: "offer", lane: n, bank: -1, cycleTicks: 0, now: false });
     offered[n] = -1;
   }
 
@@ -78,30 +76,19 @@ export function createScheduler({ engine, lanes, gridTicks, bankSize, playingBan
   function render(n: number, cycleIndex: number | null, now = false) {
     withdraw(n); // from here on the player stays on its bank
     const playingNow = playingBank(n);
-    const current = banks[n][playingNow];
-    if (cycleIndex === null) cycleIndex = current.cycle;
+    if (cycleIndex === null) cycleIndex = banks[n][playingNow].cycle;
     const bank = (1 - playingNow) as 0 | 1;
-    // Note-offs handed on. Running, whatever is offered follows the playing Cycle in time (even when a Length or Rate
-    // change has renumbered the Cycles), so it takes that Cycle's carried note-offs; a "now" replacement takes over
-    // the ones the playing Cycle took over, plus everything it would have sent. Stopped, nothing is sounding.
-    // If the Cycle length or Reset period changed, the old note-off positions mean nothing in the new table: the
-    // player releases the Voice as it switches instead.
-    const frame = `${engine.cycleTicks(n)}/${engine.resetTicks()}`;
-    const release = playing && frame !== current.frame;
-    const handOn = playing && !release;
-    const carried = !handOn ? [] : now ? current.carried : current.table.carry;
-    const table = engine.cycleTable(n, gridTicks, cycleIndex, carried, handOn && now ? current.table : EMPTY);
     const target = banks[n][bank];
     for (const key of target.keys) send({ type: "remove", key });
-    target.keys = table.slots.map(({ slot, notes }) => {
+    target.keys = engine.slotTable(n, gridTicks, cycleIndex).map(({ slot, notes }) => {
       const key = (n * 2 + bank) * bankSize + slot;
       send({ type: "write", key, notes });
       return key;
     });
-    Object.assign(target, { cycle: cycleIndex, table, carried, frame });
+    target.cycle = cycleIndex;
     offered[n] = bank;
     // while stopped the player adopts this at once
-    send({ type: "offer", lane: n, bank, cycleTicks: engine.cycleTicks(n), now: now && playing, release });
+    send({ type: "offer", lane: n, bank, cycleTicks: engine.cycleTicks(n), now: now && playing });
   }
 
   // Keep a Lane's banks on the polled song position (cycleIndex = the Cycle there). Stopped, the player should hold
