@@ -29,6 +29,7 @@ __export(index_exports, {
   HUB_OUTLETS: () => HUB_OUTLETS,
   LANES: () => LANES,
   LANE_DEFAULTS: () => LANE_DEFAULTS,
+  PITCH_PRESETS: () => PITCH_PRESETS,
   PITCH_STEPS: () => PITCH_STEPS,
   PLAYER: () => PLAYER,
   PLAYER_POSITION: () => PLAYER_POSITION,
@@ -285,7 +286,11 @@ var HUB_OUTLETS = {
   // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
   controls: 14,
   // "<lane> <control> <value>" to move a Lane's controls (Randomise and its Undo)
-  devicePresetMenu: 15
+  pitchPresetBoxes: 15,
+  // "<lane> <length> <deg0> ... <deg7>" from a Pitch Preset
+  pitchPresetMenus: 16,
+  // "<lane> set 0": the Pitch Preset menu back to "—"
+  devicePresetMenu: 17
   // "set 0": the top-level Device Preset menu back to "—"
 };
 var FREEZE_OFF = -1;
@@ -298,7 +303,8 @@ var CONTROL_NAMES = {
   length: "dial_L{lane}_len",
   rotate: "dial_L{lane}_rot",
   rate: "dial_L{lane}_rate",
-  rhythm: "menu_L{lane}_rhythm"
+  rhythm: "menu_L{lane}_rhythm",
+  pitchPreset: "menu_L{lane}_pitch_preset"
 };
 var controlName = (kind, lane, voice = 0) => CONTROL_NAMES[kind].replace("{lane}", String(lane)).replace("{voice}", String(voice));
 var clamp = (value, [lo, hi]) => Math.max(lo, Math.min(hi, value));
@@ -1309,3 +1315,27 @@ function createEngine() {
     }
   };
 }
+var PITCH_PRESETS = [
+  // Anchors & Pedals
+  { name: "Root Drone", degrees: [0] },
+  { name: "Octave Bounce", degrees: [0, 7] },
+  { name: "Root & 5th", degrees: [0, 4] },
+  // Diatonic Arpeggios
+  { name: "Triad Up", degrees: [0, 2, 4] },
+  { name: "Triad Arch", degrees: [0, 2, 4, 2] },
+  { name: "Seventh Arp", degrees: [0, 2, 4, 6] },
+  { name: "Alberti Bass", degrees: [0, 4, 2, 4] },
+  // Acid Techno & 303 Lines
+  { name: "Acid Octaves", degrees: [0, 7, 0, 7, 0, 2, 7, 0] },
+  { name: "Acid Bounce", degrees: [0, 0, 7, 0, 6, 0, 4, 7] },
+  { name: "Acid Slide", degrees: [0, 2, 3, 7, 6, 4, 2, 0] },
+  { name: "Acid Roll", degrees: [0, 0, 2, 0] },
+  // Sequencer Figures & Ostinatos
+  { name: "Berlin Ostinato", degrees: [0, 0, 7, 0, 5] },
+  { name: "Sub Drop", degrees: [0, 0, -1, 0] },
+  { name: "Passacaglia", degrees: [0, -1, -2, -3] },
+  // Minimalist & Contour Figures
+  { name: "Reich Cell", degrees: [0, 1, 4, 5, 6] },
+  { name: "Pendulum 3", degrees: [0, 2, 0] },
+  { name: "Zigzag 5", degrees: [0, 3, 1, 4, 2] }
+];

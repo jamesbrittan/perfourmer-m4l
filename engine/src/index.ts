@@ -553,3 +553,38 @@ export function createEngine() {
   };
 }
 export * from "./device-presets";
+
+export interface PitchPreset {
+  readonly name: string;
+  readonly degrees: readonly number[];
+}
+
+/** Named melodic figures, arpeggios, ostinatos, and 303 lines a Lane can load into its Pitch Cycle. */
+export const PITCH_PRESETS: readonly PitchPreset[] = [
+  // Anchors & Pedals
+  { name: "Root Drone", degrees: [0] },
+  { name: "Octave Bounce", degrees: [0, 7] },
+  { name: "Root & 5th", degrees: [0, 4] },
+
+  // Diatonic Arpeggios
+  { name: "Triad Up", degrees: [0, 2, 4] },
+  { name: "Triad Arch", degrees: [0, 2, 4, 2] },
+  { name: "Seventh Arp", degrees: [0, 2, 4, 6] },
+  { name: "Alberti Bass", degrees: [0, 4, 2, 4] },
+
+  // Acid Techno & 303 Lines
+  { name: "Acid Octaves", degrees: [0, 7, 0, 7, 0, 2, 7, 0] },
+  { name: "Acid Bounce", degrees: [0, 0, 7, 0, 6, 0, 4, 7] },
+  { name: "Acid Slide", degrees: [0, 2, 3, 7, 6, 4, 2, 0] },
+  { name: "Acid Roll", degrees: [0, 0, 2, 0] },
+
+  // Sequencer Figures & Ostinatos
+  { name: "Berlin Ostinato", degrees: [0, 0, 7, 0, 5] },
+  { name: "Sub Drop", degrees: [0, 0, -1, 0] },
+  { name: "Passacaglia", degrees: [0, -1, -2, -3] },
+
+  // Minimalist & Contour Figures
+  { name: "Reich Cell", degrees: [0, 1, 4, 5, 6] },
+  { name: "Pendulum 3", degrees: [0, 2, 0] },
+  { name: "Zigzag 5", degrees: [0, 3, 1, 4, 2] },
+];
