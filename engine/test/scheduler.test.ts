@@ -62,8 +62,8 @@ describe("The player, fed by the scheduler", () => {
 
   it("follows a jump in song position", () => {
     const sim = simulate({ play: [{ start: BAR * 2, ticks: BAR * 4 }, { start: BAR * 41 + 360, ticks: BAR * 6 }], resetBars: 4 });
-    const [from, to] = [BAR * 41 + 360, BAR * 47];
-    expect(between(sim, from, to)).toEqual(expected(sim, from, to));
+    const [from, to] = [BAR * 41 + 360, BAR * 47]; // playback starts here, so only notes from here
+    expect(between(sim, from, to)).toEqual(expected(sim, from, to, true));
     expect(sim.clobbers).toBe(0);
   });
 
