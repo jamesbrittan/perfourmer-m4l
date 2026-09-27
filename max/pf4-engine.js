@@ -31,6 +31,7 @@ __export(index_exports, {
   PITCH_STEPS: () => PITCH_STEPS,
   PLAYER: () => PLAYER,
   PLAYER_POSITION: () => PLAYER_POSITION,
+  RANDOM_GROUPS: () => RANDOM_GROUPS,
   RANGES: () => RANGES,
   RATES: () => RATES,
   RHYTHM_PRESETS: () => RHYTHM_PRESETS,
@@ -39,11 +40,12 @@ __export(index_exports, {
   controlName: () => controlName,
   createEngine: () => createEngine,
   createScheduler: () => createScheduler,
-  inRange: () => inRange
+  inRange: () => inRange,
+  randomSettings: () => randomSettings
 });
 module.exports = __toCommonJS(index_exports);
 
-// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -137,7 +139,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -278,8 +280,10 @@ var HUB_OUTLETS = {
   // "<lane> set <text>"
   script: 12,
   // scripting messages to thispatcher
-  frozen: 13
+  frozen: 13,
   // each Lane's held Cycle (FREEZE_OFF, FREEZE_BASE or the Cycle), to the stored-only pattr
+  controls: 14
+  // "<lane> <control> <value>" to move a Lane's controls (Randomise and its Undo)
 };
 var FREEZE_OFF = -1;
 var FREEZE_BASE = -2;
@@ -302,6 +306,32 @@ function inRange(lane) {
   if (out.pitchCycle) {
     const degrees = out.pitchCycle.slice(0, PITCH_STEPS).map((d) => clamp(d, RANGES.degree));
     out.pitchCycle = degrees.length ? degrees : [0];
+  }
+  return out;
+}
+var RANDOM_GROUPS = ["rhythm", "pitch", "evolution"];
+function randomSettings(current, groups, random) {
+  const int = (lo, hi) => lo + Math.floor(random() * (hi - lo + 1));
+  const pick = (choices) => choices[Math.floor(random() * choices.length)];
+  const out = {};
+  if (groups.includes("rhythm")) {
+    const length = int(3, 16);
+    out.length = length;
+    out.hits = int(1, length);
+    out.rotate = int(0, length - 1);
+    out.rate = pick(["1/8", "1/16"]);
+  }
+  if (groups.includes("pitch")) {
+    const degrees = current.pitchCycle ?? [0];
+    const centre = Math.round(degrees.reduce((a, b) => a + b, 0) / degrees.length);
+    const [lo, hi] = RANGES.degree;
+    const around = [Math.max(lo, centre - 5), Math.min(hi, centre + 5)];
+    out.pitchCycle = Array.from({ length: int(2, 6) }, () => int(...around));
+  }
+  if (groups.includes("evolution")) {
+    out.probability = int(70, 100);
+    out.mutation = int(0, 60);
+    out.seed = int(0, RANGES.seed[1]);
   }
   return out;
 }
