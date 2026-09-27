@@ -43,7 +43,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -137,7 +137,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -526,6 +526,11 @@ function createEngine() {
   let scale = C_MAJOR;
   let voiceLayout = SPLITS["1+1+1+1"];
   let layoutChange = { from: voiceLayout, at: 0 };
+  let reach = voiceLayout;
+  const union = (...layouts) => Array.from(
+    { length: Math.max(...layouts.map((l) => l.length)) },
+    (_, n) => [...new Set(layouts.flatMap((l) => l[n] ?? []))].sort((a, b) => a - b)
+  );
   let ticksPerBar = 1920;
   let resetBars = 0;
   let resetTicks = 0;
@@ -620,10 +625,13 @@ function createEngine() {
     return voiceLayout[lane] ?? [];
   }
   function changeLayout(next, songTicks) {
-    if (songTicks === void 0) layoutChange = { from: next, at: 0 };
-    else {
+    if (songTicks === void 0) {
+      layoutChange = { from: next, at: 0 };
+      reach = next;
+    } else {
       let at = (Math.floor(songTicks / ticksPerBar) + 1) * ticksPerBar;
       if (at - songTicks < CHANGE_LEAD) at += ticksPerBar;
+      reach = union(reach, layoutChange.from, voiceLayout, next);
       layoutChange = { from: songTicks < layoutChange.at ? layoutChange.from : voiceLayout, at };
     }
     voiceLayout = next;
@@ -740,11 +748,18 @@ function createEngine() {
     setVoiceLayout(layout, songTicks) {
       changeLayout(layout.map((voices) => [...voices]), songTicks);
     },
+    /** The Voices a Lane's player must release: its own, plus any it had in the layouts changes have replaced since
+     * the last one was retired. */
+    releaseVoices(lane) {
+      return [...reach[lane] ?? []];
+    },
     /** Forget the Voice Layout a change replaced once the bar it landed on has played (a jump back in the song
      * then hears the new layout). Returns whether it did. */
     retireVoiceLayout(songTicks) {
-      if (layoutChange.from === voiceLayout || songTicks < layoutChange.at + ticksPerBar) return false;
+      if (layoutChange.from === voiceLayout && reach === voiceLayout || songTicks < layoutChange.at + ticksPerBar)
+        return false;
       layoutChange = { from: voiceLayout, at: 0 };
+      reach = voiceLayout;
       return true;
     },
     slotTable,

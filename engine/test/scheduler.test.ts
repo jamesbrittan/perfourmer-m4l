@@ -134,7 +134,7 @@ describe("Timing a change to the bar", () => {
   it("counts from the latest song position known: the last poll or the last Cycle boundary a Lane reported", () => {
     const engine = createEngine();
     engine.configure({ lanes: [{ hits: 1, length: 4, rotate: 0 }] }); // 480-tick Cycles
-    const scheduler = createScheduler({ engine, lanes: 1, gridTicks: 2, bankSize: 10000, playingBank: () => 0, send() {} });
+    const scheduler = createScheduler({ engine, lanes: 1, gridTicks: 2, bankSize: 10000, playingBank: () => 0, send() { /* no-op */ } });
     expect(scheduler.changePosition()).toBeUndefined(); // stopped: at once
     scheduler.transport(true);
     scheduler.poll(1000);
@@ -182,8 +182,14 @@ describe("Random edits while playing", () => {
       if (sim.clobbers) problems.push(`trial ${trial}: ${sim.clobbers} writes into a playing bank`);
       if (hanging(sim, end).length) problems.push(`trial ${trial}: hanging notes ${JSON.stringify(hanging(sim, end))}`);
       // Judge the last bars, long after the last edit. Cycles longer than that can't be judged, nor Cycles shorter than
-      // the script's round trip: a Cycle is rendered as the one before it starts, so those play a Cycle behind.
-      const judged = (n: number) => sim.engine.cycleTicks(n) <= BAR * 3 && sim.engine.cycleTicks(n) > 3 * latency + 20;
+      // the script's round trip (including the sliver of a Cycle a Reset leaves): a Cycle is rendered as the one
+      // before it starts, so those play a Cycle behind.
+      const shortest = (n: number) => {
+        const cycle = sim.engine.cycleTicks(n);
+        const sliver = resetBars ? (resetBars * BAR) % cycle : 0;
+        return sliver > 1e-6 ? Math.min(cycle, sliver) : cycle;
+      };
+      const judged = (n: number) => sim.engine.cycleTicks(n) <= BAR * 3 && shortest(n) > 3 * latency + 20;
       const [from, to] = [start + BAR * (bars - 4), end - 480];
       const want = expected(sim, from, to);
       const got = between(sim, from, to);
