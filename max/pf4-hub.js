@@ -399,9 +399,13 @@ const e16Page = rhythmPage();
 const e16Display = createE16Display(e16Page);
 let e16Connected = false;
 let e16cs = null;
-// The CCs can reach the Hub by several routes (the control surface, its live.object, midiin); the first route to
-// deliver one is the only one listened to after that, so each click counts once.
+// The CCs can reach the Hub by several routes (the control surface, its live.object, midiin), often more than one
+// at once. Only one route is listened to, so each click counts once; another route takes over once the one listened
+// to has been quiet for a while (copies of one click arrive within a few ms of each other).
+const E16_ROUTE_QUIET_MS = 150;
 let e16Route = null;
+let e16RouteHeard = 0;
+const e16RoutesSeen = new Set();
 
 /** Send one SysEx message to the E16 through the MaxForLive control surface. */
 function sendE16Sysex(sysex) {
@@ -442,7 +446,9 @@ function e16setup() {
   }
 
   try {
+    let reported = 0;
     e16cs = new LiveAPI((args) => {
+      if (reported++ < 3) post("PF4 Hub: control surface sent: " + [].concat(args).join(" ") + "\n");
       const bytes = args[0] === "midi" ? args.slice(1) : args;
       e16midi("surface", ...bytes);
     }, "control_surfaces " + targetIndex);
@@ -462,7 +468,9 @@ function e16setup() {
 }
 
 /** MIDI from the control surface's live.object (any words before the bytes are skipped). */
+let e16rawReported = 0;
 function e16raw(...args) {
+  if (e16rawReported++ < 3) post("PF4 Hub: live.object sent: " + args.join(" ") + "\n");
   e16midi("object", ...args.filter((a) => typeof a === "number" || /^\d+$/.test(String(a))));
 }
 
@@ -476,11 +484,18 @@ function e16midi(route, status, cc, value) {
 }
 
 function e16from(route, cc, value) {
-  if (e16Route === null) {
-    e16Route = route;
-    post("PF4 Hub: E16 CCs arrive by " + route + "\n");
+  const now = Date.now();
+  if (!e16RoutesSeen.has(route)) {
+    e16RoutesSeen.add(route);
+    post("PF4 Hub: E16 CC " + cc + " " + value + " arrived by " + route + "\n");
   }
-  if (route === e16Route) e16cc(cc, value);
+  if (route !== e16Route) {
+    if (e16Route !== null && now - e16RouteHeard < E16_ROUTE_QUIET_MS) return; // a copy of a click already counted
+    e16Route = route;
+    post("PF4 Hub: listening to E16 CCs from " + route + "\n");
+  }
+  e16RouteHeard = now;
+  e16cc(cc, value);
 }
 
 /** Handle a CC from the E16. */
