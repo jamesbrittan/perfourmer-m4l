@@ -448,10 +448,13 @@ function e16setup() {
   try {
     let reported = 0;
     e16cs = new LiveAPI((args) => {
-      if (reported++ < 3) post("PF4 Hub: control surface sent: " + [].concat(args).join(" ") + "\n");
-      const bytes = args[0] === "midi" ? args.slice(1) : args;
-      e16midi("surface", ...bytes);
+      args = [].concat(args);
+      if (reported++ < 5) post("PF4 Hub: control surface sent: " + args.join(" ") + "\n");
+      if (args[0] !== "received_midi") return; // replies to our own calls, id changes
+      e16midi("surface", ...args.slice(1));
     }, "control_surfaces " + targetIndex);
+    // once grabbed, the E16's MIDI no longer reaches the tracks; the surface reports it as received_midi
+    e16cs.property = "received_midi";
 
     e16cs.call("grab_midi");
     e16Connected = true;
