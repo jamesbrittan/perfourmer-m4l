@@ -423,12 +423,7 @@ def build_hub():
     # --- E16 Hardware Integration (ControlSurface live.object + live.path)
     e16_path = P.obj("live.path", 1000, Y + 200, ins=1, outs=3, varname="e16_path")
     e16_obj = P.obj("live.object", 1000, Y + 260, ins=2, outs=2, varname="e16_object")
-    e16_t = P.obj("t b l", 1000, Y + 230, ins=1, outs=2)
-    e16_grab = P.msg("call grab_midi", 1020, Y + 245)
-    P.c(e16_path, e16_t, 0, 0)
-    P.c(e16_t, e16_obj, 1, 1)
-    P.c(e16_t, e16_grab, 0, 0)
-    P.c(e16_grab, e16_obj, 0, 0)
+    P.c(e16_path, e16_obj, 0, 1)  # the adapter grabs the surface's MIDI; live.object only sends SysEx as a fallback
     P.c(adapter, e16_obj, OUT["e16"], 0)
     to_adapter_midi = P.obj("prepend e16raw", 1000, Y + 300)
     P.c(e16_obj, to_adapter_midi, 0, 0)

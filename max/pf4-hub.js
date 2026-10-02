@@ -418,12 +418,15 @@ function e16setup() {
   e16cs = null;
   let targetIndex = -1;
 
+  const seen = [];
   for (let i = 0; i < 6; i++) {
     try {
       const api = new LiveAPI("control_surfaces " + i);
       if (!api || !api.id || Number(api.id) === 0) continue;
-      // MaxForLive is the only surface with register_midi_control; never grab another controller's MIDI
-      if (String(api.info || "").indexOf("register_midi_control") !== -1) {
+      // only the MaxForLive surface; never grab another controller's MIDI
+      const typeName = [].concat(api.get("type_name")).join(" ");
+      seen.push(i + ": " + typeName);
+      if (typeName.toLowerCase().indexOf("maxforlive") !== -1) {
         targetIndex = i;
         break;
       }
@@ -433,7 +436,8 @@ function e16setup() {
   }
 
   if (targetIndex === -1) {
-    post("PF4 Hub: E16 needs the MaxForLive control surface in Live's Link/Tempo/MIDI preferences.\n");
+    post("PF4 Hub: E16 needs the MaxForLive control surface in Live's Link/Tempo/MIDI preferences. ");
+    post("Control surfaces found: " + (seen.join(", ") || "none") + "\n");
     return;
   }
 
