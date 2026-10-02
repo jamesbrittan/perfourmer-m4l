@@ -541,12 +541,12 @@ var clamp2 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 var LANE_COLOURS = [
   { r: 0, g: 0, b: 0 },
   // Lane 1: purple
-  { r: 15, g: 0, b: 0 },
-  // Lane 2: green
-  { r: 11, g: 0, b: 0 },
+  { r: 40, g: 0, b: 0 },
+  // Lane 2: yellow
+  { r: 70, g: 0, b: 0 },
   // Lane 3: pink
-  { r: 7, g: 0, b: 0 }
-  // Lane 4: yellow
+  { r: 90, g: 0, b: 0 }
+  // Lane 4: green
 ];
 var ringScale = (value, lo, hi) => hi === lo ? 64 : Math.round((value - lo) / (hi - lo) * 127);
 function numericControl(kind, lane, param, labelFn, colour) {

@@ -155,9 +155,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
  */
 export const LANE_COLOURS = [
   { r: 0, g: 0, b: 0 }, // Lane 1: purple
-  { r: 15, g: 0, b: 0 }, // Lane 2: green
-  { r: 11, g: 0, b: 0 }, // Lane 3: pink
-  { r: 7, g: 0, b: 0 }, // Lane 4: yellow
+  { r: 40, g: 0, b: 0 }, // Lane 2: yellow
+  { r: 70, g: 0, b: 0 }, // Lane 3: pink
+  { r: 90, g: 0, b: 0 }, // Lane 4: green
 ] as const;
 
 /** Scale a value from [lo, hi] to [0, 127] for the LED ring. */

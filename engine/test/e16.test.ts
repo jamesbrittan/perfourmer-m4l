@@ -343,9 +343,9 @@ describe("Rhythm page (4 quadrants)", () => {
     expect(messages.length).toBe(17);
     // each Lane's E16 colour value
     expect(messages[1][7]).toBe(0); // encoder 1, Lane 1: purple
-    expect(messages[3][7]).toBe(15); // encoder 3, Lane 2: green
-    expect(messages[9][7]).toBe(11); // encoder 9, Lane 3: pink
-    expect(messages[11][7]).toBe(7); // encoder 11, Lane 4: yellow
+    expect(messages[3][7]).toBe(40); // encoder 3, Lane 2: yellow
+    expect(messages[9][7]).toBe(70); // encoder 9, Lane 3: pink
+    expect(messages[11][7]).toBe(90); // encoder 11, Lane 4: green
   });
 });
 

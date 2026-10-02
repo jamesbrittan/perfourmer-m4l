@@ -62,7 +62,19 @@
 --   Page: CC on Channel 1, CC 119 (0-11)
 --   SysEx: F0 00 7F 7F 01 <enc 0-15 or 7F> <ring 0-127> <colour 0-99> <unused> <unused> <c0-c3> F7
 
-local VERSION      = "v7"  -- shown in the page title, to check which script the E16 is running
+-- LED colours (leds.updateByIndex's colour argument) are an index into the OXI App's 100-colour palette,
+-- 0-99, not the 0-15 the Lua API doc describes. Approximate ranges, seen on the E16 with full rings:
+--   0-4    purple              35-45  yellows              73-83  more blues
+--   5-12   blue                46-56  pinks                84-86  turquoise
+--   13-21  lighter blue        57-63  reds                 87-99  greens
+--   22-26  lighter blue again  64-72  more pinks
+--   27-33  light purple
+--   34     blue/white
+-- The Lanes use 0 (purple), 40 (yellow), 70 (pink) and 90 (green), set by the Hub (LANE_COLOURS).
+-- Rings must be drawn with leds.updateByIndex: leds.update addresses a control by script ID, and the normal
+-- encoder view then shows the control's own scene colour instead.
+
+local VERSION      = "v8"  -- shown in the page title, to check which script the E16 is running
 local MIDI_CH      = 0     -- MIDI channel 1 (0-indexed); output 3 sent channel 1 even when asked for 16
 local ENC_CC_BASE  = 20    -- first encoder CC
 local PUSH_CC_BASE = 40    -- first push CC
