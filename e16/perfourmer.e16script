@@ -1,50 +1,58 @@
---@assign id=1  abbr="Rate" name="Rate"          desc="Lane 1 Rate"          manual=true g=1
---@assign id=17 abbr="Rate" name="Rate Push"     desc="Lane 1 Rate Push"     p=true      g=1
+-- Lane 1 (Quadrant 1: Knobs 1, 2, 5, 6)
+--@assign id=1  abbr="Hits" name="L1 Hits"   desc="Lane 1 Hits"   manual=true g=1
+--@assign id=17 abbr="Hits" name="L1 Hits P" desc="Lane 1 Hits P" p=true      g=1
 
---@assign id=2  abbr="Len"  name="Length"        desc="Lane 1 Length"        manual=true g=2
---@assign id=18 abbr="Len"  name="Length Push"   desc="Lane 1 Length Push"   p=true      g=2
+--@assign id=2  abbr="Len"  name="L1 Length" desc="Lane 1 Length" manual=true g=2
+--@assign id=18 abbr="Len"  name="L1 Len P"  desc="Lane 1 Len P"  p=true      g=2
 
---@assign id=3  abbr="Hits" name="Hits"          desc="Lane 1 Hits"          manual=true g=3
---@assign id=19 abbr="Hits" name="Hits Push"     desc="Lane 1 Hits Push"     p=true      g=3
+-- Lane 2 (Quadrant 2: Knobs 3, 4, 7, 8)
+--@assign id=3  abbr="Hits" name="L2 Hits"   desc="Lane 2 Hits"   manual=true g=3
+--@assign id=19 abbr="Hits" name="L2 Hits P" desc="Lane 2 Hits P" p=true      g=3
 
---@assign id=4  abbr="Rot"  name="Rotate"        desc="Lane 1 Rotate"        manual=true g=4
---@assign id=20 abbr="Rot"  name="Rotate Push"   desc="Lane 1 Rotate Push"   p=true      g=4
+--@assign id=4  abbr="Len"  name="L2 Length" desc="Lane 2 Length" manual=true g=4
+--@assign id=20 abbr="Len"  name="L2 Len P"  desc="Lane 2 Len P"  p=true      g=4
 
---@assign id=5  abbr="Gate" name="Gate"          desc="Lane 1 Gate"          manual=true g=5
---@assign id=21 abbr="Gate" name="Gate Push"     desc="Lane 1 Gate Push"     p=true      g=5
+-- Lane 1 (Quadrant 1 bottom)
+--@assign id=5  abbr="Rot"  name="L1 Rotate" desc="Lane 1 Rotate" manual=true g=5
+--@assign id=21 abbr="Rot"  name="L1 Rot P"  desc="Lane 1 Rot P"  p=true      g=5
 
---@assign id=6  abbr="Vel"  name="Velocity"      desc="Lane 1 Velocity"      manual=true g=6
---@assign id=22 abbr="Vel"  name="Velocity Push" desc="Lane 1 Velocity Push" p=true      g=6
+--@assign id=6  abbr="Rate" name="L1 Rate"   desc="Lane 1 Rate"   manual=true g=6
+--@assign id=22 abbr="Rate" name="L1 Rate P" desc="Lane 1 Rate P" p=true      g=6
 
---@assign id=7  abbr="Acc"  name="Accent"        desc="Lane 1 Accent"        manual=true g=7
---@assign id=23 abbr="Acc"  name="Accent Push"   desc="Lane 1 Accent Push"   p=true      g=7
+-- Lane 2 (Quadrant 2 bottom)
+--@assign id=7  abbr="Rot"  name="L2 Rotate" desc="Lane 2 Rotate" manual=true g=7
+--@assign id=23 abbr="Rot"  name="L2 Rot P"  desc="Lane 2 Rot P"  p=true      g=7
 
---@assign id=8  abbr="Prob" name="Probability"   desc="Lane 1 Probability"   manual=true g=8
---@assign id=24 abbr="Prob" name="Prob Push"     desc="Lane 1 Prob Push"     p=true      g=8
+--@assign id=8  abbr="Rate" name="L2 Rate"   desc="Lane 2 Rate"   manual=true g=8
+--@assign id=24 abbr="Rate" name="L2 Rate P" desc="Lane 2 Rate P" p=true      g=8
 
---@assign id=9  abbr="Mut"  name="Mutation"      desc="Lane 1 Mutation"      manual=true g=9
---@assign id=25 abbr="Mut"  name="Mutation Push" desc="Lane 1 Mutation Push" p=true      g=9
+-- Lane 3 (Quadrant 3: Knobs 9, 10, 13, 14)
+--@assign id=9  abbr="Hits" name="L3 Hits"   desc="Lane 3 Hits"   manual=true g=9
+--@assign id=25 abbr="Hits" name="L3 Hits P" desc="Lane 3 Hits P" p=true      g=9
 
---@assign id=10 abbr="Mode" name="Group Mode"    desc="Lane 1 Group Mode"    manual=true g=10
---@assign id=26 abbr="Mode" name="Mode Push"     desc="Lane 1 Mode Push"     p=true      g=10
+--@assign id=10 abbr="Len"  name="L3 Length" desc="Lane 3 Length" manual=true g=10
+--@assign id=26 abbr="Len"  name="L3 Len P"  desc="Lane 3 Len P"  p=true      g=10
 
---@assign id=11 abbr="Chrd" name="Chord Shape"   desc="Lane 1 Chord Shape"   manual=true g=11
---@assign id=27 abbr="Chrd" name="Chord Push"    desc="Lane 1 Chord Push"    p=true      g=11
+-- Lane 4 (Quadrant 4: Knobs 11, 12, 15, 16)
+--@assign id=11 abbr="Hits" name="L4 Hits"   desc="Lane 4 Hits"   manual=true g=11
+--@assign id=27 abbr="Hits" name="L4 Hits P" desc="Lane 4 Hits P" p=true      g=11
 
---@assign id=12 abbr="E12"  name="Encoder 12"    desc="Encoder 12"           manual=true g=12
---@assign id=28 abbr="E12"  name="Enc 12 Push"   desc="Encoder 12 Push"      p=true      g=12
+--@assign id=12 abbr="Len"  name="L4 Length" desc="Lane 4 Length" manual=true g=12
+--@assign id=28 abbr="Len"  name="L4 Len P"  desc="Lane 4 Len P"  p=true      g=12
 
---@assign id=13 abbr="E13"  name="Encoder 13"    desc="Encoder 13"           manual=true g=13
---@assign id=29 abbr="E13"  name="Enc 13 Push"   desc="Encoder 13 Push"      p=true      g=13
+-- Lane 3 (Quadrant 3 bottom)
+--@assign id=13 abbr="Rot"  name="L3 Rotate" desc="Lane 3 Rotate" manual=true g=13
+--@assign id=29 abbr="Rot"  name="L3 Rot P"  desc="Lane 3 Rot P"  p=true      g=13
 
---@assign id=14 abbr="E14"  name="Encoder 14"    desc="Encoder 14"           manual=true g=14
---@assign id=30 abbr="E14"  name="Enc 14 Push"   desc="Encoder 14 Push"      p=true      g=14
+--@assign id=14 abbr="Rate" name="L3 Rate"   desc="Lane 3 Rate"   manual=true g=14
+--@assign id=30 abbr="Rate" name="L3 Rate P" desc="Lane 3 Rate P" p=true      g=14
 
---@assign id=15 abbr="E15"  name="Encoder 15"    desc="Encoder 15"           manual=true g=15
---@assign id=31 abbr="E15"  name="Enc 15 Push"   desc="Encoder 15 Push"      p=true      g=15
+-- Lane 4 (Quadrant 4 bottom)
+--@assign id=15 abbr="Rot"  name="L4 Rotate" desc="Lane 4 Rotate" manual=true g=15
+--@assign id=31 abbr="Rot"  name="L4 Rot P"  desc="Lane 4 Rot P"  p=true      g=15
 
---@assign id=16 abbr="E16"  name="Encoder 16"    desc="Encoder 16"           manual=true g=16
---@assign id=32 abbr="E16"  name="Enc 16 Push"   desc="Encoder 16 Push"      p=true      g=16
+--@assign id=16 abbr="Rate" name="L4 Rate"   desc="Lane 4 Rate"   manual=true g=16
+--@assign id=32 abbr="Rate" name="L4 Rate P" desc="Lane 4 Rate P" p=true      g=16
 
 -- Perfourmer Hub <-> OXI E16 Controller Script
 --
@@ -136,18 +144,8 @@ function controller.onSysex(bytes)
     -- LED ring position (0-127 -> 0-16383)
     local ring_val = (ring * 16383) // 127
 
-    -- Color mapping
-    local color = 10
-    if r > 80 and g < 40 then
-      color = 80
-    elseif b > 80 then
-      color = 60
-    elseif g > 80 then
-      color = 20
-    elseif r < 40 and g < 40 and b < 40 then
-      color = 0
-    end
-
+    -- Color index: r carries the Oxi color index (0-15)
+    local color = r % 16
     leds.update(slot, ring_val, color)
   end
 end

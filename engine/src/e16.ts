@@ -147,6 +147,25 @@ const RATE_LABELS: Record<Rate, string> = {
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** Scale a value from [lo, hi] to [0, 127] for the LED ring. */
+/**
+ * Quadrant LED colors for Lanes 1–4.
+ *
+ * The E16 firmware leds.update(index, value, color) takes an integer color index (0–15).
+ * The Hub passes this index in the 'r' byte of SysEx, accompanied by RGB values.
+ *
+ * Lane 1 (top-left):     Cyan (color index 7)
+ * Lane 2 (top-right):    Orange (color index 2)
+ * Lane 3 (bottom-left):  Green (color index 5)
+ * Lane 4 (bottom-right): Magenta (color index 12)
+ */
+export const LANE_COLOURS = [
+  { r: 7, g: 127, b: 127 },  // Lane 1: Cyan (index 7)
+  { r: 2, g: 60, b: 0 },     // Lane 2: Orange (index 2)
+  { r: 5, g: 127, b: 0 },    // Lane 3: Green (index 5)
+  { r: 12, g: 127, b: 0 },   // Lane 4: Magenta (index 12)
+] as const;
+
+/** Scale a value from [lo, hi] to [0, 127] for the LED ring. */
 const ringScale = (value: number, lo: number, hi: number) =>
   hi === lo ? 64 : Math.round(((value - lo) / (hi - lo)) * 127);
 
@@ -156,6 +175,7 @@ function numericControl(
   lane: number,
   param: keyof LaneParams & keyof typeof RANGES,
   labelFn?: (value: number, settings: Readonly<LaneParams>) => string,
+  colour?: { r: number; g: number; b: number },
 ): E16Control {
   const [lo, hi] = RANGES[param];
   return {
@@ -172,11 +192,12 @@ function numericControl(
       ? (s) => labelFn((s[param] as number) ?? lo, s)
       : (s) => String((s[param] as number) ?? lo).padStart(4, " "),
     ring: (s) => ringScale((s[param] as number) ?? lo, lo, hi),
+    colour,
   };
 }
 
 /** Rate: an enumerated control stepping through RATES. */
-function rateControl(lane: number): E16Control {
+export function rateControl(lane: number, colour?: { r: number; g: number; b: number }): E16Control {
   return {
     kind: "rate",
     lane,
@@ -189,11 +210,12 @@ function rateControl(lane: number): E16Control {
     },
     label: (s) => RATE_LABELS[s.rate ?? "1/16"],
     ring: (s) => ringScale(RATES.indexOf(s.rate ?? "1/16"), 0, RATES.length - 1),
+    colour,
   };
 }
 
 /** Length: numeric, but stepping it may clamp Hits. */
-function lengthControl(lane: number): E16Control {
+export function lengthControl(lane: number, colour?: { r: number; g: number; b: number }): E16Control {
   const [lo, hi] = RANGES.length;
   return {
     kind: "length",
@@ -210,11 +232,12 @@ function lengthControl(lane: number): E16Control {
     },
     label: (s) => String(s.length).padStart(4, " "),
     ring: (s) => ringScale(s.length, lo, hi),
+    colour,
   };
 }
 
 /** Hits: numeric, clamped to [0, Length]. */
-function hitsControl(lane: number): E16Control {
+export function hitsControl(lane: number, colour?: { r: number; g: number; b: number }): E16Control {
   const lo = RANGES.hits[0];
   return {
     kind: "hits",
@@ -228,11 +251,12 @@ function hitsControl(lane: number): E16Control {
     },
     label: (s) => String(s.hits).padStart(4, " "),
     ring: (s) => ringScale(s.hits, lo, s.length),
+    colour,
   };
 }
 
 /** Rotate: numeric, clamped to [0, Length - 1]. */
-function rotateControl(lane: number): E16Control {
+export function rotateControl(lane: number, colour?: { r: number; g: number; b: number }): E16Control {
   return {
     kind: "rotate",
     lane,
@@ -245,6 +269,7 @@ function rotateControl(lane: number): E16Control {
     },
     label: (s) => String(s.rotate).padStart(4, " "),
     ring: (s) => ringScale(s.rotate, 0, Math.max(0, s.length - 1)),
+    colour,
   };
 }
 
@@ -321,18 +346,47 @@ export function testPage(): E16Page {
   };
 }
 
-// ─── Full page layout (for after the hardware test) ─────────────────────────
-
-/** Build the rhythm page for one Lane: Rate, Length, Hits, Rotate. */
-export function rhythmPage(lane: number): E16Page {
+// ─── Full page layout ────────────────────────────────────────────────────────
+ 
+/**
+ * Rhythm page: replicates the Hub's Rhythm tab across all 4 Lanes in 4 quadrants.
+ *
+ * Quadrant layout on the 4x4 E16 grid:
+ *   Top-Left (Lane 1):     Hits [0], Length [1] / Rotate [4], Rate [5]
+ *   Top-Right (Lane 2):    Hits [2], Length [3] / Rotate [6], Rate [7]
+ *   Bottom-Left (Lane 3):  Hits [8], Length [9] / Rotate [12], Rate [13]
+ *   Bottom-Right (Lane 4): Hits [10], Length [11] / Rotate [14], Rate [15]
+ *
+ * Each quadrant matches the Ableton UI: Hits above Rotate, Length above Rate.
+ * Each quadrant is color-coded by Lane via LANE_COLOURS.
+ */
+export function rhythmPage(): E16Page {
   return {
-    title: `R L${lane + 1}`,
+    title: "RHY ",
     encoders: [
-      rateControl(lane),
-      lengthControl(lane),
-      hitsControl(lane),
-      rotateControl(lane),
-      ...Array(12).fill(null),
+      // Row 0
+      hitsControl(0, LANE_COLOURS[0]),
+      lengthControl(0, LANE_COLOURS[0]),
+      hitsControl(1, LANE_COLOURS[1]),
+      lengthControl(1, LANE_COLOURS[1]),
+
+      // Row 1
+      rotateControl(0, LANE_COLOURS[0]),
+      rateControl(0, LANE_COLOURS[0]),
+      rotateControl(1, LANE_COLOURS[1]),
+      rateControl(1, LANE_COLOURS[1]),
+
+      // Row 2
+      hitsControl(2, LANE_COLOURS[2]),
+      lengthControl(2, LANE_COLOURS[2]),
+      hitsControl(3, LANE_COLOURS[3]),
+      lengthControl(3, LANE_COLOURS[3]),
+
+      // Row 3
+      rotateControl(2, LANE_COLOURS[2]),
+      rateControl(2, LANE_COLOURS[2]),
+      rotateControl(3, LANE_COLOURS[3]),
+      rateControl(3, LANE_COLOURS[3]),
     ],
   };
 }

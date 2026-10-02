@@ -29,6 +29,7 @@ __export(index_exports, {
   GROUP_MODES: () => GROUP_MODES,
   HUB_OUTLETS: () => HUB_OUTLETS,
   LANES: () => LANES,
+  LANE_COLOURS: () => LANE_COLOURS,
   LANE_DEFAULTS: () => LANE_DEFAULTS,
   PAGE_CC: () => PAGE_CC,
   PITCH_PRESETS: () => PITCH_PRESETS,
@@ -50,12 +51,16 @@ __export(index_exports, {
   decodeDelta: () => decodeDelta,
   encoderCC: () => encoderCC,
   encoderSysEx: () => encoderSysEx,
+  hitsControl: () => hitsControl,
   inRange: () => inRange,
+  lengthControl: () => lengthControl,
   pageRefresh: () => pageRefresh,
   pageTitleSysEx: () => pageTitleSysEx,
   pushCC: () => pushCC,
   randomSettings: () => randomSettings,
+  rateControl: () => rateControl,
   rhythmPage: () => rhythmPage,
+  rotateControl: () => rotateControl,
   stepEncoder: () => stepEncoder,
   testPage: () => testPage
 });
@@ -532,8 +537,18 @@ var RATE_LABELS = {
   "1/32Q": "32Q "
 };
 var clamp2 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+var LANE_COLOURS = [
+  { r: 7, g: 127, b: 127 },
+  // Lane 1: Cyan (index 7)
+  { r: 2, g: 60, b: 0 },
+  // Lane 2: Orange (index 2)
+  { r: 5, g: 127, b: 0 },
+  // Lane 3: Green (index 5)
+  { r: 12, g: 127, b: 0 }
+  // Lane 4: Magenta (index 12)
+];
 var ringScale = (value, lo, hi) => hi === lo ? 64 : Math.round((value - lo) / (hi - lo) * 127);
-function numericControl(kind, lane, param, labelFn) {
+function numericControl(kind, lane, param, labelFn, colour) {
   const [lo, hi] = RANGES[param];
   return {
     kind,
@@ -546,10 +561,11 @@ function numericControl(kind, lane, param, labelFn) {
       return { [param]: next };
     },
     label: labelFn ? (s) => labelFn(s[param] ?? lo, s) : (s) => String(s[param] ?? lo).padStart(4, " "),
-    ring: (s) => ringScale(s[param] ?? lo, lo, hi)
+    ring: (s) => ringScale(s[param] ?? lo, lo, hi),
+    colour
   };
 }
-function rateControl(lane) {
+function rateControl(lane, colour) {
   return {
     kind: "rate",
     lane,
@@ -561,10 +577,11 @@ function rateControl(lane) {
       return { rate: RATES[next] };
     },
     label: (s) => RATE_LABELS[s.rate ?? "1/16"],
-    ring: (s) => ringScale(RATES.indexOf(s.rate ?? "1/16"), 0, RATES.length - 1)
+    ring: (s) => ringScale(RATES.indexOf(s.rate ?? "1/16"), 0, RATES.length - 1),
+    colour
   };
 }
-function lengthControl(lane) {
+function lengthControl(lane, colour) {
   const [lo, hi] = RANGES.length;
   return {
     kind: "length",
@@ -579,10 +596,11 @@ function lengthControl(lane) {
       return out;
     },
     label: (s) => String(s.length).padStart(4, " "),
-    ring: (s) => ringScale(s.length, lo, hi)
+    ring: (s) => ringScale(s.length, lo, hi),
+    colour
   };
 }
-function hitsControl(lane) {
+function hitsControl(lane, colour) {
   const lo = RANGES.hits[0];
   return {
     kind: "hits",
@@ -595,10 +613,11 @@ function hitsControl(lane) {
       return { hits: next };
     },
     label: (s) => String(s.hits).padStart(4, " "),
-    ring: (s) => ringScale(s.hits, lo, s.length)
+    ring: (s) => ringScale(s.hits, lo, s.length),
+    colour
   };
 }
-function rotateControl(lane) {
+function rotateControl(lane, colour) {
   return {
     kind: "rotate",
     lane,
@@ -610,7 +629,8 @@ function rotateControl(lane) {
       return { rotate: next };
     },
     label: (s) => String(s.rotate).padStart(4, " "),
-    ring: (s) => ringScale(s.rotate, 0, Math.max(0, s.length - 1))
+    ring: (s) => ringScale(s.rotate, 0, Math.max(0, s.length - 1)),
+    colour
   };
 }
 function groupModeControl(lane) {
@@ -681,15 +701,30 @@ function testPage() {
     ]
   };
 }
-function rhythmPage(lane) {
+function rhythmPage() {
   return {
-    title: `R L${lane + 1}`,
+    title: "RHY ",
     encoders: [
-      rateControl(lane),
-      lengthControl(lane),
-      hitsControl(lane),
-      rotateControl(lane),
-      ...Array(12).fill(null)
+      // Row 0
+      hitsControl(0, LANE_COLOURS[0]),
+      lengthControl(0, LANE_COLOURS[0]),
+      hitsControl(1, LANE_COLOURS[1]),
+      lengthControl(1, LANE_COLOURS[1]),
+      // Row 1
+      rotateControl(0, LANE_COLOURS[0]),
+      rateControl(0, LANE_COLOURS[0]),
+      rotateControl(1, LANE_COLOURS[1]),
+      rateControl(1, LANE_COLOURS[1]),
+      // Row 2
+      hitsControl(2, LANE_COLOURS[2]),
+      lengthControl(2, LANE_COLOURS[2]),
+      hitsControl(3, LANE_COLOURS[3]),
+      lengthControl(3, LANE_COLOURS[3]),
+      // Row 3
+      rotateControl(2, LANE_COLOURS[2]),
+      rateControl(2, LANE_COLOURS[2]),
+      rotateControl(3, LANE_COLOURS[3]),
+      rateControl(3, LANE_COLOURS[3])
     ]
   };
 }

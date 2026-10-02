@@ -26,6 +26,8 @@ const {
   randomSettings,
   // E16 controller
   testPage,
+  rhythmPage,
+  LANE_COLOURS,
   stepEncoder,
   pageRefresh,
   decodeDelta,
@@ -394,7 +396,7 @@ function bye(deviceId) {
 // to update the encoder's display. Every value change from any source
 // (mouse, automation, preset, Randomise) triggers a page refresh.
 
-const e16Page = testPage();
+const e16Page = rhythmPage();
 let e16Connected = false;
 let e16cs = null;
 
@@ -524,6 +526,15 @@ function e16cc(cc, value) {
     setControls(result.lane, result.changes);
     // Send the SysEx feedback immediately for this encoder
     sendE16Sysex(result.sysex);
+    return;
+  }
+  // Encoder push: push on Rotate resets rotation to 0
+  if (numCC >= PUSH_CC_BASE && numCC < PUSH_CC_BASE + 16) {
+    const encoder = numCC - PUSH_CC_BASE;
+    const control = e16Page.encoders[encoder];
+    if (control && control.kind === "rotate") {
+      setControls(control.lane, { rotate: 0 });
+    }
     return;
   }
   // Page change

@@ -6,6 +6,8 @@ import {
   stepEncoder,
   pageRefresh,
   testPage,
+  rhythmPage,
+  LANE_COLOURS,
   E16_CHANNEL,
   ENCODER_CC_BASE,
   REL_INCREMENT,
@@ -270,3 +272,82 @@ describe("The step result carries the right Lane", () => {
     }
   });
 });
+
+describe("Rhythm page (4 quadrants)", () => {
+  const page = rhythmPage();
+
+  it("sets the page title to RHY", () => {
+    expect(page.title).toBe("RHY ");
+  });
+
+  it("populates all 16 encoder slots", () => {
+    expect(page.encoders.length).toBe(16);
+    expect(page.encoders.every((e) => e !== null)).toBe(true);
+  });
+
+  it("maps Quadrant 1 (top-left) to Lane 0 with Lane 1 colour", () => {
+    // Enc 0: Hits, Enc 1: Length, Enc 4: Rotate, Enc 5: Rate
+    const q1 = [0, 1, 4, 5];
+    for (const idx of q1) {
+      expect(page.encoders[idx]!.lane).toBe(0);
+      expect(page.encoders[idx]!.colour).toEqual(LANE_COLOURS[0]);
+    }
+    expect(page.encoders[0]!.kind).toBe("hits");
+    expect(page.encoders[1]!.kind).toBe("length");
+    expect(page.encoders[4]!.kind).toBe("rotate");
+    expect(page.encoders[5]!.kind).toBe("rate");
+  });
+
+  it("maps Quadrant 2 (top-right) to Lane 1 with Lane 2 colour", () => {
+    // Enc 2: Hits, Enc 3: Length, Enc 6: Rotate, Enc 7: Rate
+    const q2 = [2, 3, 6, 7];
+    for (const idx of q2) {
+      expect(page.encoders[idx]!.lane).toBe(1);
+      expect(page.encoders[idx]!.colour).toEqual(LANE_COLOURS[1]);
+    }
+    expect(page.encoders[2]!.kind).toBe("hits");
+    expect(page.encoders[3]!.kind).toBe("length");
+    expect(page.encoders[6]!.kind).toBe("rotate");
+    expect(page.encoders[7]!.kind).toBe("rate");
+  });
+
+  it("maps Quadrant 3 (bottom-left) to Lane 2 with Lane 3 colour", () => {
+    // Enc 8: Hits, Enc 9: Length, Enc 12: Rotate, Enc 13: Rate
+    const q3 = [8, 9, 12, 13];
+    for (const idx of q3) {
+      expect(page.encoders[idx]!.lane).toBe(2);
+      expect(page.encoders[idx]!.colour).toEqual(LANE_COLOURS[2]);
+    }
+    expect(page.encoders[8]!.kind).toBe("hits");
+    expect(page.encoders[9]!.kind).toBe("length");
+    expect(page.encoders[12]!.kind).toBe("rotate");
+    expect(page.encoders[13]!.kind).toBe("rate");
+  });
+
+  it("maps Quadrant 4 (bottom-right) to Lane 3 with Lane 4 colour", () => {
+    // Enc 10: Hits, Enc 11: Length, Enc 14: Rotate, Enc 15: Rate
+    const q4 = [10, 11, 14, 15];
+    for (const idx of q4) {
+      expect(page.encoders[idx]!.lane).toBe(3);
+      expect(page.encoders[idx]!.colour).toEqual(LANE_COLOURS[3]);
+    }
+    expect(page.encoders[10]!.kind).toBe("hits");
+    expect(page.encoders[11]!.kind).toBe("length");
+    expect(page.encoders[14]!.kind).toBe("rotate");
+    expect(page.encoders[15]!.kind).toBe("rate");
+  });
+
+  it("generates SysEx messages with quadrant colours on page refresh", () => {
+    const messages = pageRefresh(page, () => defaults);
+    expect(messages.length).toBe(17);
+    // Encoder 0 (Lane 0) has color index 7
+    expect(messages[1][7]).toBe(7);
+    // Encoder 2 (Lane 1) has color index 2
+    expect(messages[3][7]).toBe(2);
+    // Encoder 8 (Lane 2) has color index 5
+    expect(messages[9][7]).toBe(5);
+    // Encoder 10 (Lane 3) has color index 12
+    expect(messages[11][7]).toBe(12);
+  });
+});
+
