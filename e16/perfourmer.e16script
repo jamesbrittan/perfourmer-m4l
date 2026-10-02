@@ -62,6 +62,7 @@
 --   Page: CC on Channel 1, CC 119 (0-11)
 --   SysEx: F0 00 7F 7F 01 <enc 0-15 or 7F> <ring 0-127> <colour 0-100> <unused> <unused> <c0-c3> F7
 
+local VERSION      = "v6"  -- shown in the page title, to check which script the E16 is running
 local MIDI_CH      = 0     -- MIDI channel 1 (0-indexed); output 3 sent channel 1 even when asked for 16
 local ENC_CC_BASE  = 20    -- first encoder CC
 local PUSH_CC_BASE = 40    -- first push CC
@@ -76,7 +77,7 @@ local function send_cc(ch, cc, val)
 end
 
 function page.onInit()
-  page.setTitle("PF4 Hub")
+  page.setTitle("PF4 Hub " .. VERSION)
   -- Request initial values from Hub by announcing page 0
   send_cc(MIDI_CH, PAGE_CC, 0)
 end
@@ -140,7 +141,7 @@ function controller.onSysex(bytes)
   local label = string.char(bytes[11], bytes[12], bytes[13], bytes[14])
 
   if enc == 0x7F then
-    page.setTitle(label)
+    page.setTitle(label .. " " .. VERSION)
   elseif enc >= 0 and enc < 16 then
     local slot = enc + 1
     slots.update(slot, label)
