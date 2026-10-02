@@ -25,11 +25,9 @@ const {
   RANDOM_GROUPS,
   randomSettings,
   // E16 controller
-  testPage,
   rhythmPage,
-  LANE_COLOURS,
   stepEncoder,
-  pageRefresh,
+  createE16Display,
   decodeDelta,
   E16_CHANNEL,
   ENCODER_CC_BASE,
@@ -374,14 +372,10 @@ function adopt(n, bank, songTicks) {
   scheduler.adopted(n, songTicks);
 }
 
-let inE16Handling = false;
-
 // a change reaches the Lane from its next Cycle (or at once while stopped)
 function refresh(n) {
   scheduler.changed(n);
-  if (!inE16Handling) {
-    e16RefreshPage(); // keep the E16's display in sync with every source of change
-  }
+  e16Update(); // keep the E16's display in sync with every source of change
 }
 
 function hello(deviceId, voice) {
@@ -398,26 +392,25 @@ function bye(deviceId) {
 // The E16 sends relative CCs on channel 16 (manual encoders). The Hub steps
 // the value, sets the live.* control via setControls, and sends SysEx back
 // to update the encoder's display. Every value change from any source
-// (mouse, automation, preset, Randomise) triggers a page refresh.
+// (mouse, automation, preset, Randomise) updates the display; only messages
+// that change what the E16 shows are sent.
 
 const e16Page = rhythmPage();
+const e16Display = createE16Display(e16Page);
 let e16Connected = false;
 let e16cs = null;
+// The CCs can reach the Hub by several routes (the control surface, its live.object, midiin); the first route to
+// deliver one is the only one listened to after that, so each click counts once.
+let e16Route = null;
 
-/** Send SysEx to the E16 via Control Surface send_midi and outlet. */
+/** Send one SysEx message to the E16 through the MaxForLive control surface. */
 function sendE16Sysex(sysex) {
-  if (e16cs) {
-    try {
-      e16cs.call("send_midi", sysex);
-    } catch {
-      try {
-        e16cs.call("send_midi", ...sysex);
-      } catch (err) {
-        post("PF4 Hub: E16 send_midi error: " + err + "\n");
-      }
-    }
+  try {
+    if (e16cs) return e16cs.call("send_midi", ...sysex);
+  } catch (err) {
+    post("PF4 Hub: E16 send_midi error: " + err + "\n");
   }
-  outlet(OUT.e16, "call", "send_midi", ...sysex);
+  outlet(OUT.e16, "call", "send_midi", ...sysex); // through the patcher's live.object
 }
 
 /** Find the MaxForLive control surface in Live's slots (0..5) and grab its MIDI. */
@@ -429,158 +422,106 @@ function e16setup() {
     try {
       const api = new LiveAPI("control_surfaces " + i);
       if (!api || !api.id || Number(api.id) === 0) continue;
-      const info = String(api.info || "");
-      // MaxForLive is the ONLY surface that has register_midi_control in its LOM interface
-      if (info.indexOf("register_midi_control") !== -1) {
+      // MaxForLive is the only surface with register_midi_control; never grab another controller's MIDI
+      if (String(api.info || "").indexOf("register_midi_control") !== -1) {
         targetIndex = i;
-        post("PF4 Hub: Found MaxForLive at control_surfaces " + i + "\n");
         break;
       }
     } catch {
-      // Continue
-    }
-  }
-
-  // Fallback: If not found by info, try index 1 (slot 2 in preferences) or 0
-  if (targetIndex === -1) {
-    for (const testIdx of [1, 0, 2, 3, 4, 5]) {
-      try {
-        const api = new LiveAPI("control_surfaces " + testIdx);
-        if (api && api.id && Number(api.id) !== 0) {
-          targetIndex = testIdx;
-          post("PF4 Hub: Using control_surfaces " + testIdx + " (fallback)\n");
-          break;
-        }
-      } catch {
-        // Continue
-      }
+      // try the next slot
     }
   }
 
   if (targetIndex === -1) {
-    post("PF4 Hub: No control surface found in Link/MIDI preferences.\n");
+    post("PF4 Hub: E16 needs the MaxForLive control surface in Live's Link/Tempo/MIDI preferences.\n");
     return;
   }
 
   try {
     e16cs = new LiveAPI((args) => {
-      let status, cc, value;
-      if (args[0] === "midi") {
-        status = Number(args[1]);
-        cc = Number(args[2]);
-        value = Number(args[3]);
-      } else {
-        status = Number(args[0]);
-        cc = Number(args[1]);
-        value = Number(args[2]);
-      }
-      if (status === 191 || status === 0xbf) {
-        e16cc(cc, value);
-      }
+      const bytes = args[0] === "midi" ? args.slice(1) : args;
+      e16midi("surface", ...bytes);
     }, "control_surfaces " + targetIndex);
 
     e16cs.call("grab_midi");
     e16Connected = true;
-    post("PF4 Hub: Connected to Oxi E16 on control_surfaces " + targetIndex + "\n");
+    post("PF4 Hub: E16 on control surface " + targetIndex + "\n");
 
-    // Configure the patcher live.path if present
+    // Point the patcher's live.path at the same surface
     outlet(OUT.script, "script", "send", "e16_path", "path", "live_set", "control_surfaces", targetIndex);
 
-    e16RefreshPage();
+    e16Display.forget();
+    e16Update();
   } catch (err) {
     post("PF4 Hub: Error attaching to control surface " + targetIndex + ": " + err + "\n");
   }
 }
 
-/** Handle raw MIDI bytes from external patch routing if present. */
-function e16raw(status, cc, value) {
-  if (Number(status) === 191 || Number(status) === 0xbf) {
-    e16cc(Number(cc), Number(value));
-  }
+/** MIDI from the control surface's live.object (any words before the bytes are skipped). */
+function e16raw(...args) {
+  e16midi("object", ...args.filter((a) => typeof a === "number" || /^\d+$/.test(String(a))));
 }
 
-let lastE16CC = -1;
-let lastE16Value = -1;
-let lastE16Time = 0;
+/** A channel-16 CC from midiin: `route` is "port" or "track". */
+function e16in(route, cc, value) {
+  e16from(String(route), Number(cc), Number(value));
+}
+
+function e16midi(route, status, cc, value) {
+  if (Number(status) === 0xb0 + E16_CHANNEL) e16from(route, Number(cc), Number(value));
+}
+
+function e16from(route, cc, value) {
+  if (e16Route === null) {
+    e16Route = route;
+    post("PF4 Hub: E16 CCs arrive by " + route + "\n");
+  }
+  if (route === e16Route) e16cc(cc, value);
+}
 
 /** Handle a CC from the E16. */
 function e16cc(cc, value) {
   e16Connected = true;
-  const numCC = Number(cc);
-  const numVal = Number(value);
-  const now = Date.now();
-  if (numCC === lastE16CC && numVal === lastE16Value && (now - lastE16Time) < 25) {
-    return;
-  }
-  lastE16CC = numCC;
-  lastE16Value = numVal;
-  lastE16Time = now;
 
   // Encoder turn
-  if (numCC >= ENCODER_CC_BASE && numCC < ENCODER_CC_BASE + 16) {
-    const encoder = numCC - ENCODER_CC_BASE;
-    const delta = decodeDelta(numVal);
-    if (delta === 0) return;
+  if (cc >= ENCODER_CC_BASE && cc < ENCODER_CC_BASE + 16) {
+    const encoder = cc - ENCODER_CC_BASE;
     const control = e16Page.encoders[encoder];
-    if (!control) return;
-    const settings = engine.laneSettings(control.lane);
-    const result = stepEncoder(e16Page, encoder, delta, settings);
+    const delta = decodeDelta(value);
+    if (!control || delta === 0) return;
+    const result = stepEncoder(e16Page, encoder, delta, engine.laneSettings(control.lane));
     if (!result) return;
-
-    inE16Handling = true;
-    try {
-      // 1. Immediately apply changes to the engine so subsequent turns see fresh state
-      engine.setLane(result.lane, result.changes);
-      // 2. Notify scheduler of parameter change
-      scheduler.changed(result.lane);
-      // 3. Move the Live GUI dials (for undo, automation recording, display)
-      setControls(result.lane, result.changes);
-      // 4. Send SysEx feedback immediately for this encoder
-      sendE16Sysex(result.sysex);
-      // 5. If Length changed, Hits or Rotate might have clamped — refresh the page to update other encoders
-      if (result.changes.length !== undefined) {
-        e16RefreshPage();
-      }
-    } finally {
-      inE16Handling = false;
-    }
+    // the engine first, so the next click steps from the new value
+    engine.setLane(result.lane, result.changes);
+    scheduler.changed(result.lane);
+    sendE16Sysex(result.sysex);
+    e16Display.sent(result.sysex);
+    setControls(result.lane, result.changes); // the Live controls follow (undo, automation recording)
+    e16Update(); // a shorter Length may have clamped Hits or Rotate
     return;
   }
   // Encoder push: push on Rotate resets rotation to 0
-  if (numCC >= PUSH_CC_BASE && numCC < PUSH_CC_BASE + 16) {
-    const encoder = numCC - PUSH_CC_BASE;
-    const control = e16Page.encoders[encoder];
+  if (cc >= PUSH_CC_BASE && cc < PUSH_CC_BASE + 16) {
+    const control = e16Page.encoders[cc - PUSH_CC_BASE];
     if (control && control.kind === "rotate") {
-      inE16Handling = true;
-      try {
-        engine.setLane(control.lane, { rotate: 0 });
-        scheduler.changed(control.lane);
-        setControls(control.lane, { rotate: 0 });
-        e16RefreshPage();
-      } finally {
-        inE16Handling = false;
-      }
+      engine.setLane(control.lane, { rotate: 0 });
+      scheduler.changed(control.lane);
+      setControls(control.lane, { rotate: 0 });
+      e16Update();
     }
     return;
   }
-  // Page change
-  if (numCC === PAGE_CC) {
-    e16RefreshPage();
-    return;
+  // Page change: the E16 has cleared its display
+  if (cc === PAGE_CC) {
+    e16Display.forget();
+    e16Update();
   }
 }
 
-/** Refresh the E16's entire page: called on page change, and whenever a Lane's settings change. */
-function e16RefreshPage() {
+/** Send the E16 whatever on its page has changed since it was last sent. */
+function e16Update() {
   if (!e16Connected) return;
-  const messages = pageRefresh(e16Page, (lane) => engine.laneSettings(lane));
-  for (const msg of messages) sendE16Sysex(msg);
-}
-
-/** Mark the E16 as connected and send the initial page. */
-function e16connect() {
-  e16Connected = true;
-  e16RefreshPage();
+  for (const message of e16Display.update((lane) => engine.laneSettings(lane))) sendE16Sysex(message);
 }
 
 function bang() {

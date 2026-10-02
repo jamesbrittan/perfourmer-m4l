@@ -46,6 +46,7 @@ __export(index_exports, {
   SPLITS: () => SPLITS,
   VOICES: () => VOICES,
   controlName: () => controlName,
+  createE16Display: () => createE16Display,
   createEngine: () => createEngine,
   createScheduler: () => createScheduler,
   decodeDelta: () => decodeDelta,
@@ -749,6 +750,24 @@ function pageRefresh(page, laneSettings) {
     messages.push(encoderSysEx(i, control.ring(s), control.label(s), control.colour));
   }
   return messages;
+}
+function createE16Display(page) {
+  const showing = /* @__PURE__ */ new Map();
+  const keep = (message) => {
+    const key = message.join(" ");
+    if (showing.get(message[5]) === key) return false;
+    showing.set(message[5], key);
+    return true;
+  };
+  return {
+    update: (laneSettings) => pageRefresh(page, laneSettings).filter(keep),
+    sent(message) {
+      keep(message);
+    },
+    forget() {
+      showing.clear();
+    }
+  };
 }
 
 // src/index.ts

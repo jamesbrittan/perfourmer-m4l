@@ -5,6 +5,7 @@ import {
   pageTitleSysEx,
   stepEncoder,
   pageRefresh,
+  createE16Display,
   testPage,
   rhythmPage,
   LANE_COLOURS,
@@ -351,3 +352,48 @@ describe("Rhythm page (4 quadrants)", () => {
   });
 });
 
+
+describe("E16 display: only what changed is sent", () => {
+  const page = rhythmPage();
+  const lanes = () => [0, 1, 2, 3].map(() => ({ ...defaults }));
+
+  it("sends the whole page the first time", () => {
+    const display = createE16Display(page);
+    const settings = lanes();
+    expect(display.update((n) => settings[n])).toEqual(pageRefresh(page, (n) => settings[n]));
+  });
+
+  it("sends nothing when nothing changed", () => {
+    const display = createE16Display(page);
+    const settings = lanes();
+    display.update((n) => settings[n]);
+    expect(display.update((n) => settings[n])).toEqual([]);
+  });
+
+  it("sends only the encoders whose display changed", () => {
+    const display = createE16Display(page);
+    const settings = lanes();
+    display.update((n) => settings[n]);
+    settings[1] = { ...settings[1], rotate: 3 };
+    const sent = display.update((n) => settings[n]);
+    expect(sent.map((m) => m[5])).toEqual([6]); // Lane 2's Rotate
+  });
+
+  it("doesn't resend what a turn already sent", () => {
+    const display = createE16Display(page);
+    const settings = lanes();
+    display.update((n) => settings[n]);
+    const turn = stepEncoder(page, 4, 1, settings[0])!;
+    display.sent(turn.sysex);
+    settings[0] = { ...settings[0], ...turn.changes };
+    expect(display.update((n) => settings[n])).toEqual([]);
+  });
+
+  it("sends the whole page again after forget (the E16 cleared its screen)", () => {
+    const display = createE16Display(page);
+    const settings = lanes();
+    display.update((n) => settings[n]);
+    display.forget();
+    expect(display.update((n) => settings[n])).toHaveLength(17);
+  });
+});

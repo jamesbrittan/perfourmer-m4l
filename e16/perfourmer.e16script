@@ -78,12 +78,13 @@ function page.onInit()
 end
 
 function controller.onEncoderTurn(enc)
-  local enc_num = 0
+  local enc_num
   if enc.index and enc.index >= 1 and enc.index <= 16 then
     enc_num = enc.index - 1
   elseif enc.id and enc.id >= 1 and enc.id <= 16 then
     enc_num = enc.id - 1
   end
+  if not enc_num then return end  -- not one of ours
 
   local inc = enc.increment or 0
   if inc == 0 then return end
@@ -98,7 +99,7 @@ function controller.onEncoderTurn(enc)
 end
 
 function controller.onEncoderPress(enc)
-  local enc_num = 0
+  local enc_num
   if enc.index and enc.index >= 1 and enc.index <= 16 then
     enc_num = enc.index - 1
   elseif enc.id and enc.id >= 17 and enc.id <= 32 then
@@ -106,6 +107,7 @@ function controller.onEncoderPress(enc)
   elseif enc.id and enc.id >= 1 and enc.id <= 16 then
     enc_num = enc.id - 1
   end
+  if not enc_num then return end  -- not one of ours
 
   send_cc(MIDI_CH, PUSH_CC_BASE + enc_num, 127)
 end

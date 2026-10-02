@@ -436,3 +436,28 @@ export function pageRefresh(
   }
   return messages;
 }
+
+/**
+ * What the E16 is showing, so only messages that change it are sent. A turn sends its own encoder at once
+ * (`sent`); `update` then sends whatever else differs, however often it's called. Call `forget` when the E16
+ * has cleared its display (a page change), so the next `update` sends the whole page.
+ */
+export function createE16Display(page: E16Page) {
+  const showing = new Map<number, string>(); // encoder (0x7f = title) → the message last sent
+  const keep = (message: number[]) => {
+    const key = message.join(" ");
+    if (showing.get(message[5]) === key) return false;
+    showing.set(message[5], key);
+    return true;
+  };
+  return {
+    update: (laneSettings: (lane: number) => Readonly<LaneParams>): number[][] =>
+      pageRefresh(page, laneSettings).filter(keep),
+    sent(message: number[]) {
+      keep(message);
+    },
+    forget() {
+      showing.clear();
+    },
+  };
+}
