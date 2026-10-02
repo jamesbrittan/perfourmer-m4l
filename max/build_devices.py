@@ -420,6 +420,21 @@ def build_hub():
     P.c(poll, poll_pos); P.c(poll_pos, where, 7); P.c(where, adapter); P.c(adapter, readouts, OUT["readouts"])
     P.c(load, adapter)                               # render every Lane once
 
+    # --- E16 Hardware Integration (ControlSurface live.object + live.path)
+    e16_path = P.obj("live.path live_set control_surfaces 1", 1000, Y + 200, ins=1, outs=3, varname="e16_path")
+    e16_obj = P.obj("live.object", 1000, Y + 260, ins=2, outs=2, varname="e16_object")
+    e16_t = P.obj("t b l", 1000, Y + 230, ins=1, outs=2)
+    e16_grab = P.msg("call grab_midi", 1020, Y + 245)
+    P.c(e16_path, e16_t, 0, 0)
+    P.c(e16_t, e16_obj, 1, 1)
+    P.c(e16_t, e16_grab, 0, 0)
+    P.c(e16_grab, e16_obj, 0, 0)
+    P.c(adapter, e16_obj, OUT["e16"], 0)
+    to_adapter_midi = P.obj("prepend e16raw", 1000, Y + 300)
+    P.c(e16_obj, to_adapter_midi, 0, 0)
+    P.c(to_adapter_midi, adapter, 0, 0)
+    P.c(here, e16_path)
+
     # --- clock: fine tick grid (ticket 01 verdict), fanned out to every Lane
     clock = P.obj(f"metro {GRID_TICKS} ticks @quantize {GRID_TICKS} ticks @active 1", 600, Y, ins=2)
     pos = P.obj("transport", 600, Y + 30, ins=2, outs=9)

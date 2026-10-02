@@ -402,50 +402,88 @@ let e16cs = null;
 function sendE16Sysex(sysex) {
   if (e16cs) {
     try {
-      e16cs.call("send_midi", ...sysex);
-    } catch (e) {
-      post("PF4 Hub: E16 send_midi error: " + e + "\n");
+      e16cs.call("send_midi", sysex);
+    } catch {
+      try {
+        e16cs.call("send_midi", ...sysex);
+      } catch (err) {
+        post("PF4 Hub: E16 send_midi error: " + err + "\n");
+      }
     }
   }
-  outlet(OUT.e16, sysex);
+  outlet(OUT.e16, "call", "send_midi", ...sysex);
 }
 
 /** Find the MaxForLive control surface in Live's slots (0..5) and grab its MIDI. */
 function e16setup() {
   e16cs = null;
+  let targetIndex = -1;
+
   for (let i = 0; i < 6; i++) {
     try {
       const api = new LiveAPI("control_surfaces " + i);
       if (!api || !api.id || Number(api.id) === 0) continue;
-      const typeName = api.get("type_name");
-      const nameStr = Array.isArray(typeName) ? typeName.join(" ") : String(typeName);
-      if (nameStr.toLowerCase().indexOf("maxforlive") !== -1) {
-        e16cs = new LiveAPI((args) => {
-          let status, cc, value;
-          if (args[0] === "midi") {
-            status = Number(args[1]);
-            cc = Number(args[2]);
-            value = Number(args[3]);
-          } else {
-            status = Number(args[0]);
-            cc = Number(args[1]);
-            value = Number(args[2]);
-          }
-          if (status === 191 || status === 0xbf) {
-            e16cc(cc, value);
-          }
-        }, "control_surfaces " + i);
-        e16cs.call("grab_midi");
-        e16Connected = true;
-        e16RefreshPage();
-        post("PF4 Hub: Connected to Oxi E16 on Control Surface " + i + " (MaxForLive)\n");
-        return;
+      const info = String(api.info || "");
+      // MaxForLive is the ONLY surface that has register_midi_control in its LOM interface
+      if (info.indexOf("register_midi_control") !== -1) {
+        targetIndex = i;
+        post("PF4 Hub: Found MaxForLive at control_surfaces " + i + "\n");
+        break;
       }
     } catch {
-      // Continue scanning
+      // Continue
     }
   }
-  post("PF4 Hub: No MaxForLive control surface found in Link/MIDI preferences.\n");
+
+  // Fallback: If not found by info, try index 1 (slot 2 in preferences) or 0
+  if (targetIndex === -1) {
+    for (const testIdx of [1, 0, 2, 3, 4, 5]) {
+      try {
+        const api = new LiveAPI("control_surfaces " + testIdx);
+        if (api && api.id && Number(api.id) !== 0) {
+          targetIndex = testIdx;
+          post("PF4 Hub: Using control_surfaces " + testIdx + " (fallback)\n");
+          break;
+        }
+      } catch {
+        // Continue
+      }
+    }
+  }
+
+  if (targetIndex === -1) {
+    post("PF4 Hub: No control surface found in Link/MIDI preferences.\n");
+    return;
+  }
+
+  try {
+    e16cs = new LiveAPI((args) => {
+      let status, cc, value;
+      if (args[0] === "midi") {
+        status = Number(args[1]);
+        cc = Number(args[2]);
+        value = Number(args[3]);
+      } else {
+        status = Number(args[0]);
+        cc = Number(args[1]);
+        value = Number(args[2]);
+      }
+      if (status === 191 || status === 0xbf) {
+        e16cc(cc, value);
+      }
+    }, "control_surfaces " + targetIndex);
+
+    e16cs.call("grab_midi");
+    e16Connected = true;
+    post("PF4 Hub: Connected to Oxi E16 on control_surfaces " + targetIndex + "\n");
+
+    // Configure the patcher live.path if present
+    outlet(OUT.script, "script", "send", "e16_path", "path", "live_set", "control_surfaces", targetIndex);
+
+    e16RefreshPage();
+  } catch (err) {
+    post("PF4 Hub: Error attaching to control surface " + targetIndex + ": " + err + "\n");
+  }
 }
 
 /** Handle raw MIDI bytes from external patch routing if present. */
