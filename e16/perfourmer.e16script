@@ -67,8 +67,12 @@ local ENC_CC_BASE  = 20    -- first encoder CC
 local PUSH_CC_BASE = 40    -- first push CC
 local PAGE_CC      = 119   -- page-change CC
 
+-- Output 3 is the one that reaches the computer over USB; output 0 ("all outputs" in the API doc) didn't in testing.
+-- Send on one output only, so each click arrives once.
+local CC_OUT = 3
+
 local function send_cc(ch, cc, val)
-  midi.sendCC(0, ch, cc, val)
+  midi.sendCC(CC_OUT, ch, cc, val)
 end
 
 function page.onInit()
