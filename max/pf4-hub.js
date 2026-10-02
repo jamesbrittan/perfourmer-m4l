@@ -24,6 +24,15 @@ const {
   PITCH_STEPS,
   RANDOM_GROUPS,
   randomSettings,
+  // E16 controller
+  testPage,
+  stepEncoder,
+  pageRefresh,
+  decodeDelta,
+  E16_CHANNEL,
+  ENCODER_CC_BASE,
+  PUSH_CC_BASE,
+  PAGE_CC,
 } = require("pf4-engine.js");
 
 outlets = Object.keys(OUT).length; // what each carries: HUB_OUTLETS in the engine
@@ -365,6 +374,7 @@ function adopt(n, bank, songTicks) {
 // a change reaches the Lane from its next Cycle (or at once while stopped)
 function refresh(n) {
   scheduler.changed(n);
+  e16RefreshPage(); // keep the E16's display in sync with every source of change
 }
 
 function hello(deviceId, voice) {
@@ -375,6 +385,51 @@ function hello(deviceId, voice) {
 function bye(deviceId) {
   engine.voiceLeft(deviceId);
   showVoices();
+}
+
+// ── E16 controller ────────────────────────────────────────────────────────────
+// The E16 sends relative CCs on channel 16 (manual encoders). The Hub steps
+// the value, sets the live.* control via setControls, and sends SysEx back
+// to update the encoder's display. Every value change from any source
+// (mouse, automation, preset, Randomise) triggers a page refresh.
+
+const e16Page = testPage();
+let e16Connected = false;
+
+/** Handle a CC from the E16 (called from a MaxForLive control surface). */
+function e16cc(cc, value) {
+  // Encoder turn
+  if (cc >= ENCODER_CC_BASE && cc < ENCODER_CC_BASE + 16) {
+    const encoder = cc - ENCODER_CC_BASE;
+    const delta = decodeDelta(value);
+    if (delta === 0) return;
+    const settings = engine.laneSettings(e16Page.encoders[encoder]?.lane ?? 0);
+    const result = stepEncoder(e16Page, encoder, delta, settings);
+    if (!result) return;
+    // Apply the change through the Hub's controls (so it's automatable, undoable, preset-saveable)
+    setControls(result.lane, result.changes);
+    // Send the SysEx feedback immediately for this encoder
+    outlet(OUT.e16, result.sysex);
+    return;
+  }
+  // Page change
+  if (cc === PAGE_CC) {
+    e16RefreshPage();
+    return;
+  }
+}
+
+/** Refresh the E16's entire page: called on page change, and whenever a Lane's settings change. */
+function e16RefreshPage() {
+  if (!e16Connected) return;
+  const messages = pageRefresh(e16Page, (lane) => engine.laneSettings(lane));
+  for (const msg of messages) outlet(OUT.e16, msg);
+}
+
+/** Mark the E16 as connected and send the initial page. */
+function e16connect() {
+  e16Connected = true;
+  e16RefreshPage();
 }
 
 function bang() {

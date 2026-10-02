@@ -5,6 +5,7 @@ import { inRange } from "./device";
 
 export { createScheduler, type PlayerCommand } from "./scheduler";
 export * from "./device";
+export * from "./e16";
 
 /** Named, known-good Euclidean rhythms a Lane can load as its Base: a short library for electronic and minimalist
  * music, each name showing its hits/length (many from Toussaint 2005). */
