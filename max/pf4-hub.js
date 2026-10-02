@@ -399,9 +399,9 @@ const e16Page = rhythmPage();
 const e16Display = createE16Display(e16Page);
 let e16Connected = false;
 let e16cs = null;
-// The CCs can reach the Hub by several routes (the control surface, its live.object, midiin), often more than one
-// at once. Only one route is listened to, so each click counts once; another route takes over once the one listened
-// to has been quiet for a while (copies of one click arrive within a few ms of each other).
+// The CCs can reach the Hub by more than one route (the E16's port and the track's input), often both at once. Only
+// one route is listened to, so each click counts once; another route takes over once the one listened to has been
+// quiet for a while (copies of one click arrive within a few ms of each other).
 const E16_ROUTE_QUIET_MS = 150;
 let e16Route = null;
 let e16RouteHeard = 0;
@@ -417,7 +417,7 @@ function sendE16Sysex(sysex) {
   outlet(OUT.e16, "call", "send_midi", ...sysex); // through the patcher's live.object
 }
 
-/** Find the MaxForLive control surface in Live's slots (0..5) and grab its MIDI. */
+/** Find the MaxForLive control surface in Live's slots (0..5), to send the E16 SysEx through. */
 function e16setup() {
   e16cs = null;
   let targetIndex = -1;
@@ -427,7 +427,7 @@ function e16setup() {
     try {
       const api = new LiveAPI("control_surfaces " + i);
       if (!api || !api.id || Number(api.id) === 0) continue;
-      // only the MaxForLive surface; never grab another controller's MIDI
+      // only the MaxForLive surface, never another controller
       const typeName = [].concat(api.get("type_name")).join(" ");
       seen.push(i + ": " + typeName);
       if (typeName.toLowerCase().indexOf("maxforlive") !== -1) {
@@ -446,23 +446,14 @@ function e16setup() {
   }
 
   try {
-    let reported = 0;
-    e16cs = new LiveAPI((args) => {
-      args = [].concat(args);
-      if (reported++ < 40) post("PF4 Hub: control surface sent: " + args.join(" ") + "\n");
-      if (args[0] !== "received_midi") return; // replies to our own calls, id changes
-      let bytes = args.slice(1);
-      if (bytes[0] === "bang") {
-        // the event may only say that MIDI arrived: read the value
-        bytes = [].concat(e16cs.get("received_midi"));
-        if (reported < 40) post("PF4 Hub: received_midi value: " + bytes.join(" ") + "\n");
-      }
-      e16midi("surface", ...bytes.filter((b) => !isNaN(Number(b))));
-    }, "control_surfaces " + targetIndex);
-    // once grabbed, the E16's MIDI no longer reaches the tracks; the surface reports it as received_midi
-    e16cs.property = "received_midi";
-
-    e16cs.call("grab_midi");
+    // The surface is only used to send SysEx. Its MIDI isn't grabbed: once grabbed, the E16's CCs stop reaching the
+    // tracks and the surface gives a device no way to read them. The CCs come in through the Hub track's MIDI input.
+    e16cs = new LiveAPI("control_surfaces " + targetIndex);
+    try {
+      e16cs.call("release_midi"); // undo a grab by an earlier version of the Hub
+    } catch {
+      // nothing was grabbed
+    }
     e16Connected = true;
     post("PF4 Hub: E16 on control surface " + targetIndex + "\n");
 
@@ -476,23 +467,9 @@ function e16setup() {
   }
 }
 
-/** MIDI from the control surface's live.object (any words before the bytes are skipped). */
-let e16rawReported = 0;
-function e16raw(...args) {
-  if (e16rawReported++ < 3) post("PF4 Hub: live.object sent: " + args.join(" ") + "\n");
-  e16midi("object", ...args.filter((a) => typeof a === "number" || /^\d+$/.test(String(a))));
-}
-
 /** A channel-16 CC from midiin: `route` is "port" or "track". */
 function e16in(route, cc, value) {
   e16from(String(route), Number(cc), Number(value));
-}
-
-let e16RejectsReported = 0;
-function e16midi(route, status, cc, value) {
-  if (Number(status) === 0xb0 + E16_CHANNEL) return e16from(route, Number(cc), Number(value));
-  if (status !== undefined && e16RejectsReported++ < 10)
-    post("PF4 Hub: ignored from " + route + ": " + [status, cc, value].join(" ") + "\n");
 }
 
 function e16from(route, cc, value) {

@@ -423,15 +423,12 @@ def build_hub():
     # --- E16 Hardware Integration (ControlSurface live.object + live.path)
     e16_path = P.obj("live.path", 1000, Y + 200, ins=1, outs=3, varname="e16_path")
     e16_obj = P.obj("live.object", 1000, Y + 260, ins=2, outs=2, varname="e16_object")
-    P.c(e16_path, e16_obj, 0, 1)  # the adapter grabs the surface's MIDI; live.object only sends SysEx as a fallback
+    P.c(e16_path, e16_obj, 0, 1)  # live.object only sends SysEx, if the adapter's own call fails
     P.c(adapter, e16_obj, OUT["e16"], 0)
-    to_adapter_midi = P.obj("prepend e16raw", 1000, Y + 300)
-    P.c(e16_obj, to_adapter_midi, 0, 0)
-    P.c(to_adapter_midi, adapter, 0, 0)
     # the adapter points e16_path at the MaxForLive surface once it has found it, never at another controller
 
-    # --- Hardware MIDI input from the E16 port and from the track, channel 16 only. The adapter listens to the
-    # first route a CC arrives by (these, or the control surface above) and ignores the rest.
+    # --- The E16's CCs, from its port and from the track's MIDI input, channel 16 only. The adapter listens to one
+    # route at a time and ignores the other's copies.
     for i, (route, text) in enumerate([("port", 'midiin "OXI E16 (Port 1)"'), ("track", "midiin")]):
         x = 1000 + i * 200
         midiin = P.obj(text, x, Y + 340, ins=1, outs=1)
