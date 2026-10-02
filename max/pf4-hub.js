@@ -467,6 +467,13 @@ function e16setup() {
   }
 }
 
+const e16BytesReported = {};
+/** E16 test: log the first raw MIDI bytes each midiin receives. */
+function e16byte(route, byte) {
+  e16BytesReported[route] = (e16BytesReported[route] || 0) + 1;
+  if (e16BytesReported[route] <= 24) post("PF4 Hub: " + route + " midiin byte " + byte + "\n");
+}
+
 /** A channel-16 CC from midiin: `route` is "port" or "track". */
 function e16in(route, cc, value) {
   e16from(String(route), Number(cc), Number(value));

@@ -437,6 +437,9 @@ def build_hub():
         gate_ch16 = P.obj("gate 1 0", x, Y + 440, ins=2, outs=1)
         prep_cc = P.obj(f"prepend e16in {route}", x, Y + 470)
         P.c(midiin, midiparse, 0, 0)
+        raw = P.obj(f"prepend e16byte {route}", x + 100, Y + 360)  # E16 test: raw bytes, before any filtering
+        P.c(midiin, raw, 0, 0)
+        P.c(raw, adapter, 0, 0)
         P.c(midiparse, is_ch16, 6, 0)     # outlet 6 is the MIDI channel (fires first, right-to-left)
         P.c(is_ch16, gate_ch16, 0, 0)     # open on channel 16
         P.c(midiparse, gate_ch16, 2, 1)   # outlet 2 is [cc, value]
