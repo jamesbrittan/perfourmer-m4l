@@ -493,13 +493,29 @@ function e16raw(status, cc, value) {
   }
 }
 
-/** Handle a CC from the E16 (called from a MaxForLive control surface). */
+let lastE16CC = -1;
+let lastE16Value = -1;
+let lastE16Time = 0;
+
+/** Handle a CC from the E16. */
 function e16cc(cc, value) {
   e16Connected = true;
+  const numCC = Number(cc);
+  const numVal = Number(value);
+  const now = Date.now();
+  if (numCC === lastE16CC && numVal === lastE16Value && (now - lastE16Time) < 5) {
+    return;
+  }
+  lastE16CC = numCC;
+  lastE16Value = numVal;
+  lastE16Time = now;
+
+  post("PF4 Hub: E16 CC " + numCC + " val " + numVal + "\n");
+
   // Encoder turn
-  if (cc >= ENCODER_CC_BASE && cc < ENCODER_CC_BASE + 16) {
-    const encoder = cc - ENCODER_CC_BASE;
-    const delta = decodeDelta(value);
+  if (numCC >= ENCODER_CC_BASE && numCC < ENCODER_CC_BASE + 16) {
+    const encoder = numCC - ENCODER_CC_BASE;
+    const delta = decodeDelta(numVal);
     if (delta === 0) return;
     const settings = engine.laneSettings(e16Page.encoders[encoder]?.lane ?? 0);
     const result = stepEncoder(e16Page, encoder, delta, settings);
@@ -511,7 +527,7 @@ function e16cc(cc, value) {
     return;
   }
   // Page change
-  if (cc === PAGE_CC) {
+  if (numCC === PAGE_CC) {
     e16RefreshPage();
     return;
   }

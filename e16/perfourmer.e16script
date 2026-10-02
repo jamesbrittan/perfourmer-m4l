@@ -54,16 +54,20 @@
 --   Page: CC on Channel 16, CC 119 (0-11)
 --   SysEx: F0 00 7F 7F 01 <enc 0-15 or 7F> <ring 0-127> <r> <g> <b> <c0-c3> F7
 
-local MIDI_PORT    = 0     -- 0 = all outputs (USB, BLE, TRS)
 local MIDI_CH      = 15    -- MIDI channel 16 (0-indexed: 0-15)
 local ENC_CC_BASE  = 20    -- first encoder CC
 local PUSH_CC_BASE = 40    -- first push CC
 local PAGE_CC      = 119   -- page-change CC
 
+local function send_cc(ch, cc, val)
+  midi.sendCC(0, ch, cc, val)
+  midi.sendCC(3, ch, cc, val)
+end
+
 function page.onInit()
   page.setTitle("PF4 Hub")
   -- Request initial values from Hub by announcing page 0
-  midi.sendCC(MIDI_PORT, MIDI_CH, PAGE_CC, 0)
+  send_cc(MIDI_CH, PAGE_CC, 0)
 end
 
 function controller.onEncoderTurn(enc)
@@ -82,7 +86,7 @@ function controller.onEncoderTurn(enc)
   if cc_val < 0 then cc_val = 0 end
   if cc_val > 127 then cc_val = 127 end
 
-  midi.sendCC(MIDI_PORT, MIDI_CH, ENC_CC_BASE + enc_num, cc_val)
+  send_cc(MIDI_CH, ENC_CC_BASE + enc_num, cc_val)
 end
 
 function controller.onEncoderPress(enc)
@@ -95,7 +99,7 @@ function controller.onEncoderPress(enc)
     enc_num = enc.index - 1
   end
 
-  midi.sendCC(MIDI_PORT, MIDI_CH, PUSH_CC_BASE + enc_num, 127)
+  send_cc(MIDI_CH, PUSH_CC_BASE + enc_num, 127)
 end
 
 function page.onPageChange(prev, curr)
@@ -104,7 +108,7 @@ function page.onPageChange(prev, curr)
     slots.reset(i)
   end
   if curr then
-    midi.sendCC(MIDI_PORT, MIDI_CH, PAGE_CC, curr - 1)
+    send_cc(MIDI_CH, PAGE_CC, curr - 1)
   end
 end
 
