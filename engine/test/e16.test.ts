@@ -341,14 +341,11 @@ describe("Rhythm page (4 quadrants)", () => {
   it("generates SysEx messages with quadrant colours on page refresh", () => {
     const messages = pageRefresh(page, () => defaults);
     expect(messages.length).toBe(17);
-    // Encoder 0 (Lane 0) has color index 7
-    expect(messages[1][7]).toBe(7);
-    // Encoder 2 (Lane 1) has color index 2
-    expect(messages[3][7]).toBe(2);
-    // Encoder 8 (Lane 2) has color index 5
-    expect(messages[9][7]).toBe(5);
-    // Encoder 10 (Lane 3) has color index 12
-    expect(messages[11][7]).toBe(12);
+    // the Lanes' colour values are spread across the E16's 0–100 range
+    expect(messages[1][7]).toBe(10); // encoder 1, Lane 1
+    expect(messages[3][7]).toBe(35); // encoder 3, Lane 2
+    expect(messages[9][7]).toBe(60); // encoder 9, Lane 3
+    expect(messages[11][7]).toBe(85); // encoder 11, Lane 4
   });
 });
 

@@ -60,7 +60,7 @@
 --   Turn: Relative CC on Channel 1 (0-indexed 0), CC 20-35 (65=+1, 63=-1)
 --   Push: CC on Channel 1, CC 40-55 (127 on press)
 --   Page: CC on Channel 1, CC 119 (0-11)
---   SysEx: F0 00 7F 7F 01 <enc 0-15 or 7F> <ring 0-127> <r> <g> <b> <c0-c3> F7
+--   SysEx: F0 00 7F 7F 01 <enc 0-15 or 7F> <ring 0-127> <colour 0-100> <unused> <unused> <c0-c3> F7
 
 local MIDI_CH      = 0     -- MIDI channel 1 (0-indexed); output 3 sent channel 1 even when asked for 16
 local ENC_CC_BASE  = 20    -- first encoder CC
@@ -137,8 +137,6 @@ function controller.onSysex(bytes)
   local enc  = bytes[6]
   local ring = bytes[7]
   local r    = bytes[8]
-  local g    = bytes[9]
-  local b    = bytes[10]
   local label = string.char(bytes[11], bytes[12], bytes[13], bytes[14])
 
   if enc == 0x7F then
@@ -150,8 +148,9 @@ function controller.onSysex(bytes)
     -- LED ring position (0-127 -> 0-16383)
     local ring_val = (ring * 16383) // 127
 
-    -- Color index: r carries the Oxi color index (0-15)
-    local color = r % 16
+    -- Colour value 0-100 (leds.update's range in practice; the API doc's 0-15 is wrong)
+    local color = r
+    if color > 100 then color = 100 end
     leds.update(slot, ring_val, color)
   end
 end

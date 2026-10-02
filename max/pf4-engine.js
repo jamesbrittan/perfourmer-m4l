@@ -539,14 +539,14 @@ var RATE_LABELS = {
 };
 var clamp2 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 var LANE_COLOURS = [
-  { r: 7, g: 127, b: 127 },
-  // Lane 1: Cyan (index 7)
-  { r: 2, g: 60, b: 0 },
-  // Lane 2: Orange (index 2)
-  { r: 5, g: 127, b: 0 },
-  // Lane 3: Green (index 5)
-  { r: 12, g: 127, b: 0 }
-  // Lane 4: Magenta (index 12)
+  { r: 10, g: 0, b: 0 },
+  // Lane 1
+  { r: 35, g: 0, b: 0 },
+  // Lane 2
+  { r: 60, g: 0, b: 0 },
+  // Lane 3
+  { r: 85, g: 0, b: 0 }
+  // Lane 4
 ];
 var ringScale = (value, lo, hi) => hi === lo ? 64 : Math.round((value - lo) / (hi - lo) * 127);
 function numericControl(kind, lane, param, labelFn, colour) {

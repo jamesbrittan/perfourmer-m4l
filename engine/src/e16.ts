@@ -56,7 +56,7 @@ export function decodeDelta(value: number): number {
 //
 // - encoder: 0–15
 // - ring:    0–127 (LED ring position)
-// - r, g, b: 0–127 (colour, 7-bit)
+// - r:       the E16 colour value, 0–100 (what leds.update takes); g, b are unused
 // - c0–c3:   4 ASCII characters (label), padded with spaces
 //
 // Manufacturer ID 00 7F 7F is "educational/development use" — fine for a
@@ -148,21 +148,17 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 
 /** Scale a value from [lo, hi] to [0, 127] for the LED ring. */
 /**
- * Quadrant LED colors for Lanes 1–4.
+ * Quadrant LED colours for Lanes 1–4, sent in the 'r' byte of the SysEx.
  *
- * The E16 firmware leds.update(index, value, color) takes an integer color index (0–15).
- * The Hub passes this index in the 'r' byte of SysEx, accompanied by RGB values.
- *
- * Lane 1 (top-left):     Cyan (color index 7)
- * Lane 2 (top-right):    Orange (color index 2)
- * Lane 3 (bottom-left):  Green (color index 5)
- * Lane 4 (bottom-right): Magenta (color index 12)
+ * leds.update(index, value, color) takes a colour value from 0 to 100, not the 0–15 index the Lua API doc
+ * describes (the user's own E16 scripts sweep 0–100). Values 0–15 all look purple/blue, so the Lanes are spread
+ * across the range.
  */
 export const LANE_COLOURS = [
-  { r: 7, g: 127, b: 127 },  // Lane 1: Cyan (index 7)
-  { r: 2, g: 60, b: 0 },     // Lane 2: Orange (index 2)
-  { r: 5, g: 127, b: 0 },    // Lane 3: Green (index 5)
-  { r: 12, g: 127, b: 0 },   // Lane 4: Magenta (index 12)
+  { r: 10, g: 0, b: 0 }, // Lane 1
+  { r: 35, g: 0, b: 0 }, // Lane 2
+  { r: 60, g: 0, b: 0 }, // Lane 3
+  { r: 85, g: 0, b: 0 }, // Lane 4
 ] as const;
 
 /** Scale a value from [lo, hi] to [0, 127] for the LED ring. */
