@@ -374,10 +374,14 @@ function adopt(n, bank, songTicks) {
   scheduler.adopted(n, songTicks);
 }
 
+let inE16Handling = false;
+
 // a change reaches the Lane from its next Cycle (or at once while stopped)
 function refresh(n) {
   scheduler.changed(n);
-  e16RefreshPage(); // keep the E16's display in sync with every source of change
+  if (!inE16Handling) {
+    e16RefreshPage(); // keep the E16's display in sync with every source of change
+  }
 }
 
 function hello(deviceId, voice) {
@@ -505,27 +509,41 @@ function e16cc(cc, value) {
   const numCC = Number(cc);
   const numVal = Number(value);
   const now = Date.now();
-  if (numCC === lastE16CC && numVal === lastE16Value && (now - lastE16Time) < 5) {
+  if (numCC === lastE16CC && numVal === lastE16Value && (now - lastE16Time) < 25) {
     return;
   }
   lastE16CC = numCC;
   lastE16Value = numVal;
   lastE16Time = now;
 
-  post("PF4 Hub: E16 CC " + numCC + " val " + numVal + "\n");
-
   // Encoder turn
   if (numCC >= ENCODER_CC_BASE && numCC < ENCODER_CC_BASE + 16) {
     const encoder = numCC - ENCODER_CC_BASE;
     const delta = decodeDelta(numVal);
     if (delta === 0) return;
-    const settings = engine.laneSettings(e16Page.encoders[encoder]?.lane ?? 0);
+    const control = e16Page.encoders[encoder];
+    if (!control) return;
+    const settings = engine.laneSettings(control.lane);
     const result = stepEncoder(e16Page, encoder, delta, settings);
     if (!result) return;
-    // Apply the change through the Hub's controls (so it's automatable, undoable, preset-saveable)
-    setControls(result.lane, result.changes);
-    // Send the SysEx feedback immediately for this encoder
-    sendE16Sysex(result.sysex);
+
+    inE16Handling = true;
+    try {
+      // 1. Immediately apply changes to the engine so subsequent turns see fresh state
+      engine.setLane(result.lane, result.changes);
+      // 2. Notify scheduler of parameter change
+      scheduler.changed(result.lane);
+      // 3. Move the Live GUI dials (for undo, automation recording, display)
+      setControls(result.lane, result.changes);
+      // 4. Send SysEx feedback immediately for this encoder
+      sendE16Sysex(result.sysex);
+      // 5. If Length changed, Hits or Rotate might have clamped — refresh the page to update other encoders
+      if (result.changes.length !== undefined) {
+        e16RefreshPage();
+      }
+    } finally {
+      inE16Handling = false;
+    }
     return;
   }
   // Encoder push: push on Rotate resets rotation to 0
@@ -533,7 +551,15 @@ function e16cc(cc, value) {
     const encoder = numCC - PUSH_CC_BASE;
     const control = e16Page.encoders[encoder];
     if (control && control.kind === "rotate") {
-      setControls(control.lane, { rotate: 0 });
+      inE16Handling = true;
+      try {
+        engine.setLane(control.lane, { rotate: 0 });
+        scheduler.changed(control.lane);
+        setControls(control.lane, { rotate: 0 });
+        e16RefreshPage();
+      } finally {
+        inE16Handling = false;
+      }
     }
     return;
   }

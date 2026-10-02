@@ -69,7 +69,6 @@ local PAGE_CC      = 119   -- page-change CC
 
 local function send_cc(ch, cc, val)
   midi.sendCC(0, ch, cc, val)
-  midi.sendCC(3, ch, cc, val)
 end
 
 function page.onInit()
@@ -80,31 +79,32 @@ end
 
 function controller.onEncoderTurn(enc)
   local enc_num = 0
-  if enc.id and enc.id >= 1 and enc.id <= 16 then
-    enc_num = enc.id - 1
-  elseif enc.index and enc.index >= 1 and enc.index <= 16 then
+  if enc.index and enc.index >= 1 and enc.index <= 16 then
     enc_num = enc.index - 1
+  elseif enc.id and enc.id >= 1 and enc.id <= 16 then
+    enc_num = enc.id - 1
   end
 
-  local delta = enc.increment or 0
-  if delta == 0 then return end
+  local inc = enc.increment or 0
+  if inc == 0 then return end
 
-  -- Relative CC: 65 = +1, 63 = -1, 66 = +2, etc.
+  -- Clamp delta to strictly +/-1 per click to guarantee 1 click = 1 value step
+  local delta = (inc > 0) and 1 or -1
+
+  -- Relative CC: 65 = +1, 63 = -1
   local cc_val = 64 + delta
-  if cc_val < 0 then cc_val = 0 end
-  if cc_val > 127 then cc_val = 127 end
 
   send_cc(MIDI_CH, ENC_CC_BASE + enc_num, cc_val)
 end
 
 function controller.onEncoderPress(enc)
   local enc_num = 0
-  if enc.id and enc.id >= 17 and enc.id <= 32 then
+  if enc.index and enc.index >= 1 and enc.index <= 16 then
+    enc_num = enc.index - 1
+  elseif enc.id and enc.id >= 17 and enc.id <= 32 then
     enc_num = enc.id - 17
   elseif enc.id and enc.id >= 1 and enc.id <= 16 then
     enc_num = enc.id - 1
-  elseif enc.index and enc.index >= 1 and enc.index <= 16 then
-    enc_num = enc.index - 1
   end
 
   send_cc(MIDI_CH, PUSH_CC_BASE + enc_num, 127)

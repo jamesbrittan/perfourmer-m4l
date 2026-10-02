@@ -435,14 +435,19 @@ def build_hub():
     P.c(to_adapter_midi, adapter, 0, 0)
     P.c(here, e16_path)
 
-    # --- Direct hardware MIDI input from OXI E16 and track
+    # --- Direct hardware MIDI input from OXI E16 and track (Channel 16 filtered)
     midiin_e16 = P.obj('midiin "OXI E16 (Port 1)"', 1000, Y + 340, ins=1, outs=1)
     midiin_track = P.obj("midiin", 1150, Y + 340, ins=1, outs=1)
     midiparse = P.obj("midiparse", 1000, Y + 380, ins=1, outs=7)
     P.c(midiin_e16, midiparse, 0, 0)
     P.c(midiin_track, midiparse, 0, 0)
-    prep_cc = P.obj("prepend e16cc", 1000, Y + 420)
-    P.c(midiparse, prep_cc, 2, 0)  # outlet 2 is Control Change [cc, val]
+    is_ch16 = P.obj("== 16", 1100, Y + 410, ins=2)
+    gate_ch16 = P.obj("gate 1 0", 1000, Y + 440, ins=2, outs=1)
+    P.c(midiparse, is_ch16, 6, 0)     # outlet 6 is MIDI channel (fires first, right-to-left)
+    P.c(is_ch16, gate_ch16, 0, 0)    # opens when channel == 16 (1), closes otherwise (0)
+    P.c(midiparse, gate_ch16, 2, 1)   # outlet 2 is CC [cc, val] (enters right inlet)
+    prep_cc = P.obj("prepend e16cc", 1000, Y + 470)
+    P.c(gate_ch16, prep_cc, 0, 0)
     P.c(prep_cc, adapter, 0, 0)
 
     # --- clock: fine tick grid (ticket 01 verdict), fanned out to every Lane
