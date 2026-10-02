@@ -331,6 +331,7 @@ function observe() {
   watch("scale_intervals", (...intervals) => setScale(scale, { intervals }));
   watch("scale_name", (name) => setScale(scale, { name }));
   updateMatrixActiveStates();
+  e16setup();
 }
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -395,9 +396,68 @@ function bye(deviceId) {
 
 const e16Page = testPage();
 let e16Connected = false;
+let e16cs = null;
+
+/** Send SysEx to the E16 via Control Surface send_midi and outlet. */
+function sendE16Sysex(sysex) {
+  if (e16cs) {
+    try {
+      e16cs.call("send_midi", ...sysex);
+    } catch (e) {
+      post("PF4 Hub: E16 send_midi error: " + e + "\n");
+    }
+  }
+  outlet(OUT.e16, sysex);
+}
+
+/** Find the MaxForLive control surface in Live's slots (0..5) and grab its MIDI. */
+function e16setup() {
+  e16cs = null;
+  for (let i = 0; i < 6; i++) {
+    try {
+      const api = new LiveAPI("control_surfaces " + i);
+      if (!api || !api.id || Number(api.id) === 0) continue;
+      const typeName = api.get("type_name");
+      const nameStr = Array.isArray(typeName) ? typeName.join(" ") : String(typeName);
+      if (nameStr.toLowerCase().indexOf("maxforlive") !== -1) {
+        e16cs = new LiveAPI((args) => {
+          let status, cc, value;
+          if (args[0] === "midi") {
+            status = Number(args[1]);
+            cc = Number(args[2]);
+            value = Number(args[3]);
+          } else {
+            status = Number(args[0]);
+            cc = Number(args[1]);
+            value = Number(args[2]);
+          }
+          if (status === 191 || status === 0xbf) {
+            e16cc(cc, value);
+          }
+        }, "control_surfaces " + i);
+        e16cs.call("grab_midi");
+        e16Connected = true;
+        e16RefreshPage();
+        post("PF4 Hub: Connected to Oxi E16 on Control Surface " + i + " (MaxForLive)\n");
+        return;
+      }
+    } catch {
+      // Continue scanning
+    }
+  }
+  post("PF4 Hub: No MaxForLive control surface found in Link/MIDI preferences.\n");
+}
+
+/** Handle raw MIDI bytes from external patch routing if present. */
+function e16raw(status, cc, value) {
+  if (Number(status) === 191 || Number(status) === 0xbf) {
+    e16cc(Number(cc), Number(value));
+  }
+}
 
 /** Handle a CC from the E16 (called from a MaxForLive control surface). */
 function e16cc(cc, value) {
+  e16Connected = true;
   // Encoder turn
   if (cc >= ENCODER_CC_BASE && cc < ENCODER_CC_BASE + 16) {
     const encoder = cc - ENCODER_CC_BASE;
@@ -409,7 +469,7 @@ function e16cc(cc, value) {
     // Apply the change through the Hub's controls (so it's automatable, undoable, preset-saveable)
     setControls(result.lane, result.changes);
     // Send the SysEx feedback immediately for this encoder
-    outlet(OUT.e16, result.sysex);
+    sendE16Sysex(result.sysex);
     return;
   }
   // Page change
@@ -423,7 +483,7 @@ function e16cc(cc, value) {
 function e16RefreshPage() {
   if (!e16Connected) return;
   const messages = pageRefresh(e16Page, (lane) => engine.laneSettings(lane));
-  for (const msg of messages) outlet(OUT.e16, msg);
+  for (const msg of messages) sendE16Sysex(msg);
 }
 
 /** Mark the E16 as connected and send the initial page. */
