@@ -1,100 +1,149 @@
--- Perfourmer Hub ↔ E16 controller script
+--@assign id=1  abbr="Rate" name="Rate"          desc="Lane 1 Rate"          manual=true g=1
+--@assign id=17 abbr="Rate" name="Rate Push"     desc="Lane 1 Rate Push"     p=true      g=1
+
+--@assign id=2  abbr="Len"  name="Length"        desc="Lane 1 Length"        manual=true g=2
+--@assign id=18 abbr="Len"  name="Length Push"   desc="Lane 1 Length Push"   p=true      g=2
+
+--@assign id=3  abbr="Hits" name="Hits"          desc="Lane 1 Hits"          manual=true g=3
+--@assign id=19 abbr="Hits" name="Hits Push"     desc="Lane 1 Hits Push"     p=true      g=3
+
+--@assign id=4  abbr="Rot"  name="Rotate"        desc="Lane 1 Rotate"        manual=true g=4
+--@assign id=20 abbr="Rot"  name="Rotate Push"   desc="Lane 1 Rotate Push"   p=true      g=4
+
+--@assign id=5  abbr="Gate" name="Gate"          desc="Lane 1 Gate"          manual=true g=5
+--@assign id=21 abbr="Gate" name="Gate Push"     desc="Lane 1 Gate Push"     p=true      g=5
+
+--@assign id=6  abbr="Vel"  name="Velocity"      desc="Lane 1 Velocity"      manual=true g=6
+--@assign id=22 abbr="Vel"  name="Velocity Push" desc="Lane 1 Velocity Push" p=true      g=6
+
+--@assign id=7  abbr="Acc"  name="Accent"        desc="Lane 1 Accent"        manual=true g=7
+--@assign id=23 abbr="Acc"  name="Accent Push"   desc="Lane 1 Accent Push"   p=true      g=7
+
+--@assign id=8  abbr="Prob" name="Probability"   desc="Lane 1 Probability"   manual=true g=8
+--@assign id=24 abbr="Prob" name="Prob Push"     desc="Lane 1 Prob Push"     p=true      g=8
+
+--@assign id=9  abbr="Mut"  name="Mutation"      desc="Lane 1 Mutation"      manual=true g=9
+--@assign id=25 abbr="Mut"  name="Mutation Push" desc="Lane 1 Mutation Push" p=true      g=9
+
+--@assign id=10 abbr="Mode" name="Group Mode"    desc="Lane 1 Group Mode"    manual=true g=10
+--@assign id=26 abbr="Mode" name="Mode Push"     desc="Lane 1 Mode Push"     p=true      g=10
+
+--@assign id=11 abbr="Chrd" name="Chord Shape"   desc="Lane 1 Chord Shape"   manual=true g=11
+--@assign id=27 abbr="Chrd" name="Chord Push"    desc="Lane 1 Chord Push"    p=true      g=11
+
+--@assign id=12 abbr="E12"  name="Encoder 12"    desc="Encoder 12"           manual=true g=12
+--@assign id=28 abbr="E12"  name="Enc 12 Push"   desc="Encoder 12 Push"      p=true      g=12
+
+--@assign id=13 abbr="E13"  name="Encoder 13"    desc="Encoder 13"           manual=true g=13
+--@assign id=29 abbr="E13"  name="Enc 13 Push"   desc="Encoder 13 Push"      p=true      g=13
+
+--@assign id=14 abbr="E14"  name="Encoder 14"    desc="Encoder 14"           manual=true g=14
+--@assign id=30 abbr="E14"  name="Enc 14 Push"   desc="Encoder 14 Push"      p=true      g=14
+
+--@assign id=15 abbr="E15"  name="Encoder 15"    desc="Encoder 15"           manual=true g=15
+--@assign id=31 abbr="E15"  name="Enc 15 Push"   desc="Encoder 15 Push"      p=true      g=15
+
+--@assign id=16 abbr="E16"  name="Encoder 16"    desc="Encoder 16"           manual=true g=16
+--@assign id=32 abbr="E16"  name="Enc 16 Push"   desc="Encoder 16 Push"      p=true      g=16
+
+-- Perfourmer Hub <-> OXI E16 Controller Script
 --
--- Thin bridge: every encoder is "manual". A turn sends one CC per click
--- (relative encoding: 65 = +1, 63 = −1). The Hub sends SysEx back to set
--- each encoder's label, ring position and colour.
---
--- This script knows nothing about the Hub's parameters — all logic lives in
--- the Hub. It only relays increments and renders what it's told.
---
--- Protocol (must match engine/src/e16.ts):
---   CC channel 16, encoders CC 20–35 (relative), pushes CC 40–55, page CC 119
---   SysEx F0 00 7F 7F 01 <enc> <ring> <r> <g> <b> <c0..c3> F7
---         enc 0x7F = page title
+-- Protocol:
+--   Turn: Relative CC on Channel 16 (0-indexed 15), CC 20-35 (65=+1, 63=-1)
+--   Push: CC on Channel 16, CC 40-55 (127 on press)
+--   Page: CC on Channel 16, CC 119 (0-11)
+--   SysEx: F0 00 7F 7F 01 <enc 0-15 or 7F> <ring 0-127> <r> <g> <b> <c0-c3> F7
 
--- ── Configuration ───────────────────────────────────────────────────────────
+local MIDI_PORT    = 0     -- 0 = all outputs (USB, BLE, TRS)
+local MIDI_CH      = 15    -- MIDI channel 16 (0-indexed: 0-15)
+local ENC_CC_BASE  = 20    -- first encoder CC
+local PUSH_CC_BASE = 40    -- first push CC
+local PAGE_CC      = 119   -- page-change CC
 
-local MIDI_CH       = 16    -- MIDI channel
-local ENC_CC_BASE   = 20    -- first encoder CC
-local PUSH_CC_BASE  = 40    -- first push-button CC
-local PAGE_CC       = 119   -- page-change CC
-
--- SysEx header to match (manufacturer ID 00 7F 7F, device 01)
-local SYSEX_MATCH = { 0x00, 0x7F, 0x7F, 0x01 }
-
--- ── Encoder setup ───────────────────────────────────────────────────────────
-
-function on_load()
-  for i = 0, 15 do
-    -- Manual mode: the script gets raw increments, not absolute values.
-    -- The "initial" value is set to 64 so the encoder has room to move in
-    -- both directions; after each turn we write 64 back so it never sticks
-    -- at the endpoints.
-    set_encoder_mode(i, MODE_MANUAL)
-    set_encoder_value(i, 64)
-    set_encoder_label(i, "    ")
-    set_encoder_ring(i, 0)
-  end
-  set_page_title("PF4 ")
+function page.onInit()
+  page.setTitle("PF4 Hub")
+  -- Request initial values from Hub by announcing page 0
+  midi.sendCC(MIDI_PORT, MIDI_CH, PAGE_CC, 0)
 end
 
--- ── Encoder turn → CC ───────────────────────────────────────────────────────
+function controller.onEncoderTurn(enc)
+  local enc_num = 0
+  if enc.id and enc.id >= 1 and enc.id <= 16 then
+    enc_num = enc.id - 1
+  elseif enc.index and enc.index >= 1 and enc.index <= 16 then
+    enc_num = enc.index - 1
+  end
 
-function on_encoder(encoder, value)
-  -- value is absolute (0–127) in manual mode; compute delta from 64
-  local delta = value - 64
+  local delta = enc.increment or 0
   if delta == 0 then return end
 
-  -- Send relative CC: 65 = +1, 63 = −1, etc.
-  local cc_value = 64 + delta
-  if cc_value < 0 then cc_value = 0 end
-  if cc_value > 127 then cc_value = 127 end
+  -- Relative CC: 65 = +1, 63 = -1, 66 = +2, etc.
+  local cc_val = 64 + delta
+  if cc_val < 0 then cc_val = 0 end
+  if cc_val > 127 then cc_val = 127 end
 
-  send_cc(MIDI_CH, ENC_CC_BASE + encoder, cc_value)
-
-  -- Reset to midpoint so the encoder never reaches its endpoints
-  set_encoder_value(encoder, 64)
+  midi.sendCC(MIDI_PORT, MIDI_CH, ENC_CC_BASE + enc_num, cc_val)
 end
 
--- ── Encoder push → CC ───────────────────────────────────────────────────────
+function controller.onEncoderPress(enc)
+  local enc_num = 0
+  if enc.id and enc.id >= 17 and enc.id <= 32 then
+    enc_num = enc.id - 17
+  elseif enc.id and enc.id >= 1 and enc.id <= 16 then
+    enc_num = enc.id - 1
+  elseif enc.index and enc.index >= 1 and enc.index <= 16 then
+    enc_num = enc.index - 1
+  end
 
-function on_push(encoder, pressed)
-  if pressed then
-    send_cc(MIDI_CH, PUSH_CC_BASE + encoder, 127)
-  else
-    send_cc(MIDI_CH, PUSH_CC_BASE + encoder, 0)
+  midi.sendCC(MIDI_PORT, MIDI_CH, PUSH_CC_BASE + enc_num, 127)
+end
+
+function page.onPageChange(prev, curr)
+  for i = 1, 16 do
+    leds.reset(i)
+    slots.reset(i)
+  end
+  if curr then
+    midi.sendCC(MIDI_PORT, MIDI_CH, PAGE_CC, curr - 1)
   end
 end
 
--- ── Page change → CC ────────────────────────────────────────────────────────
-
-function on_page(page)
-  send_cc(MIDI_CH, PAGE_CC, page)
-end
-
--- ── SysEx from the Hub → display update ─────────────────────────────────────
-
-function on_sysex(data)
-  -- Verify header: 00 7F 7F 01
-  if #data < 14 then return end
-  for i = 1, #SYSEX_MATCH do
-    if data[i] ~= SYSEX_MATCH[i] then return end
+function controller.onSysex(bytes)
+  -- SysEx framing: F0 00 7F 7F 01 <enc> <ring> <r> <g> <b> <c0> <c1> <c2> <c3> F7
+  if not bytes or #bytes < 15 then return end
+  if bytes[1] ~= 0xF0 or bytes[2] ~= 0x00 or bytes[3] ~= 0x7F or bytes[4] ~= 0x7F or bytes[5] ~= 0x01 then
+    return
   end
+  if bytes[#bytes] ~= 0xF7 then return end
 
-  local enc  = data[5]
-  local ring = data[6]
-  local r    = data[7]
-  local g    = data[8]
-  local b    = data[9]
-  local label = string.char(data[10], data[11], data[12], data[13])
+  local enc  = bytes[6]
+  local ring = bytes[7]
+  local r    = bytes[8]
+  local g    = bytes[9]
+  local b    = bytes[10]
+  local label = string.char(bytes[11], bytes[12], bytes[13], bytes[14])
 
   if enc == 0x7F then
-    -- Page title
-    set_page_title(label)
-  else
-    -- Encoder update
-    set_encoder_label(enc, label)
-    set_encoder_ring(enc, ring)
-    set_encoder_color(enc, r, g, b)
+    page.setTitle(label)
+  elseif enc >= 0 and enc < 16 then
+    local slot = enc + 1
+    slots.update(slot, label)
+
+    -- LED ring position (0-127 -> 0-16383)
+    local ring_val = (ring * 16383) // 127
+
+    -- Color mapping
+    local color = 10
+    if r > 80 and g < 40 then
+      color = 80
+    elseif b > 80 then
+      color = 60
+    elseif g > 80 then
+      color = 20
+    elseif r < 40 and g < 40 and b < 40 then
+      color = 0
+    end
+
+    leds.update(slot, ring_val, color)
   end
 end
