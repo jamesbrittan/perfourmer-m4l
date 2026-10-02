@@ -151,14 +151,13 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
  * Quadrant LED colours for Lanes 1–4, sent in the 'r' byte of the SysEx.
  *
  * leds.update(index, value, color) takes a colour value from 0 to 100, not the 0–15 index the Lua API doc
- * describes (the user's own E16 scripts sweep 0–100). Values 0–15 all look purple/blue, so the Lanes are spread
- * across the range.
+ * describes. The values were picked on the E16 with a colour test script.
  */
 export const LANE_COLOURS = [
-  { r: 10, g: 0, b: 0 }, // Lane 1
-  { r: 35, g: 0, b: 0 }, // Lane 2
-  { r: 60, g: 0, b: 0 }, // Lane 3
-  { r: 85, g: 0, b: 0 }, // Lane 4
+  { r: 0, g: 0, b: 0 }, // Lane 1: purple
+  { r: 15, g: 0, b: 0 }, // Lane 2: green
+  { r: 11, g: 0, b: 0 }, // Lane 3: pink
+  { r: 7, g: 0, b: 0 }, // Lane 4: yellow
 ] as const;
 
 /** Scale a value from [lo, hi] to [0, 127] for the LED ring. */
