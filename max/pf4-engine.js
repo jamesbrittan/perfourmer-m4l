@@ -472,7 +472,7 @@ function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: repo
 }
 
 // src/e16.ts
-var E16_CHANNEL = 15;
+var E16_CHANNEL = 0;
 var ENCODER_CC_BASE = 20;
 var encoderCC = (encoder) => ENCODER_CC_BASE + encoder;
 var PUSH_CC_BASE = 40;

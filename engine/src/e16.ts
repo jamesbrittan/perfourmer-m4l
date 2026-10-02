@@ -20,7 +20,7 @@ import { RANGES } from "./device";
 // also send CCs.
 
 /** MIDI channel the E16 script sends and receives on (0-indexed). */
-export const E16_CHANNEL = 15; // channel 16
+export const E16_CHANNEL = 0; // channel 1: the E16's USB output sends on channel 1 whatever channel the script asks for
 
 /** CC numbers for the 16 encoders (one per encoder, 0-indexed within a page). */
 export const ENCODER_CC_BASE = 20;

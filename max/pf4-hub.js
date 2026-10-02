@@ -389,7 +389,7 @@ function bye(deviceId) {
 }
 
 // ── E16 controller ────────────────────────────────────────────────────────────
-// The E16 sends relative CCs on channel 16 (manual encoders). The Hub steps
+// The E16 sends relative CCs on channel 1 (manual encoders). The Hub steps
 // the value, sets the live.* control via setControls, and sends SysEx back
 // to update the encoder's display. Every value change from any source
 // (mouse, automation, preset, Randomise) updates the display; only messages

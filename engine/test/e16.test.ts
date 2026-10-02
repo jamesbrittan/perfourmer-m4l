@@ -19,8 +19,8 @@ import { RATES, type LaneParams, LANE_DEFAULTS } from "../src/index";
 const defaults: Readonly<LaneParams> = { ...LANE_DEFAULTS[0] };
 
 describe("CC protocol", () => {
-  it("uses channel 16 (0-indexed 15)", () => {
-    expect(E16_CHANNEL).toBe(15);
+  it("uses channel 1 (0-indexed 0)", () => {
+    expect(E16_CHANNEL).toBe(0);
   });
 
   it("gives each of the 16 encoders a unique CC", () => {

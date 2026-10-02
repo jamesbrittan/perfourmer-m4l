@@ -57,12 +57,12 @@
 -- Perfourmer Hub <-> OXI E16 Controller Script
 --
 -- Protocol:
---   Turn: Relative CC on Channel 16 (0-indexed 15), CC 20-35 (65=+1, 63=-1)
---   Push: CC on Channel 16, CC 40-55 (127 on press)
---   Page: CC on Channel 16, CC 119 (0-11)
+--   Turn: Relative CC on Channel 1 (0-indexed 0), CC 20-35 (65=+1, 63=-1)
+--   Push: CC on Channel 1, CC 40-55 (127 on press)
+--   Page: CC on Channel 1, CC 119 (0-11)
 --   SysEx: F0 00 7F 7F 01 <enc 0-15 or 7F> <ring 0-127> <r> <g> <b> <c0-c3> F7
 
-local MIDI_CH      = 15    -- MIDI channel 16 (0-indexed: 0-15)
+local MIDI_CH      = 0     -- MIDI channel 1 (0-indexed); output 3 sent channel 1 even when asked for 16
 local ENC_CC_BASE  = 20    -- first encoder CC
 local PUSH_CC_BASE = 40    -- first push CC
 local PAGE_CC      = 119   -- page-change CC
