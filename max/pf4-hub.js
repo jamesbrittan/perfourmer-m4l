@@ -449,9 +449,15 @@ function e16setup() {
     let reported = 0;
     e16cs = new LiveAPI((args) => {
       args = [].concat(args);
-      if (reported++ < 5) post("PF4 Hub: control surface sent: " + args.join(" ") + "\n");
+      if (reported++ < 40) post("PF4 Hub: control surface sent: " + args.join(" ") + "\n");
       if (args[0] !== "received_midi") return; // replies to our own calls, id changes
-      e16midi("surface", ...args.slice(1));
+      let bytes = args.slice(1);
+      if (bytes[0] === "bang") {
+        // the event may only say that MIDI arrived: read the value
+        bytes = [].concat(e16cs.get("received_midi"));
+        if (reported < 40) post("PF4 Hub: received_midi value: " + bytes.join(" ") + "\n");
+      }
+      e16midi("surface", ...bytes.filter((b) => !isNaN(Number(b))));
     }, "control_surfaces " + targetIndex);
     // once grabbed, the E16's MIDI no longer reaches the tracks; the surface reports it as received_midi
     e16cs.property = "received_midi";
@@ -482,8 +488,11 @@ function e16in(route, cc, value) {
   e16from(String(route), Number(cc), Number(value));
 }
 
+let e16RejectsReported = 0;
 function e16midi(route, status, cc, value) {
-  if (Number(status) === 0xb0 + E16_CHANNEL) e16from(route, Number(cc), Number(value));
+  if (Number(status) === 0xb0 + E16_CHANNEL) return e16from(route, Number(cc), Number(value));
+  if (status !== undefined && e16RejectsReported++ < 10)
+    post("PF4 Hub: ignored from " + route + ": " + [status, cc, value].join(" ") + "\n");
 }
 
 function e16from(route, cc, value) {
