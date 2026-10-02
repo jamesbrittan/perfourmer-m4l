@@ -60,9 +60,9 @@
 --   Turn: Relative CC on Channel 1 (0-indexed 0), CC 20-35 (65=+1, 63=-1)
 --   Push: CC on Channel 1, CC 40-55 (127 on press)
 --   Page: CC on Channel 1, CC 119 (0-11)
---   SysEx: F0 00 7F 7F 01 <enc 0-15 or 7F> <ring 0-127> <colour 0-100> <unused> <unused> <c0-c3> F7
+--   SysEx: F0 00 7F 7F 01 <enc 0-15 or 7F> <ring 0-127> <colour 0-99> <unused> <unused> <c0-c3> F7
 
-local VERSION      = "v6"  -- shown in the page title, to check which script the E16 is running
+local VERSION      = "v7"  -- shown in the page title, to check which script the E16 is running
 local MIDI_CH      = 0     -- MIDI channel 1 (0-indexed); output 3 sent channel 1 even when asked for 16
 local ENC_CC_BASE  = 20    -- first encoder CC
 local PUSH_CC_BASE = 40    -- first push CC
@@ -149,9 +149,11 @@ function controller.onSysex(bytes)
     -- LED ring position (0-127 -> 0-16383)
     local ring_val = (ring * 16383) // 127
 
-    -- Colour value 0-100 (leds.update's range in practice; the API doc's 0-15 is wrong)
+    -- Colour: an index into the OXI App's 100-colour palette (0-99), not the API doc's 0-15
     local color = r
-    if color > 100 then color = 100 end
-    leds.update(slot, ring_val, color)
+    if color > 99 then color = 99 end
+    -- By physical position: leds.update addresses a control by script ID, and in the normal view the
+    -- E16 then draws the control's own scene colour instead of ours
+    leds.updateByIndex(slot, ring_val, color)
   end
 end

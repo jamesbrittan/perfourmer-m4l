@@ -56,7 +56,7 @@ export function decodeDelta(value: number): number {
 //
 // - encoder: 0–15
 // - ring:    0–127 (LED ring position)
-// - r:       the E16 colour value, 0–100 (what leds.update takes); g, b are unused
+// - r:       the E16 colour, an index into the OXI App's palette (0–99); g, b are unused
 // - c0–c3:   4 ASCII characters (label), padded with spaces
 //
 // Manufacturer ID 00 7F 7F is "educational/development use" — fine for a
@@ -150,8 +150,8 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 /**
  * Quadrant LED colours for Lanes 1–4, sent in the 'r' byte of the SysEx.
  *
- * leds.update(index, value, color) takes a colour value from 0 to 100, not the 0–15 index the Lua API doc
- * describes. The values were picked on the E16 with a colour test script.
+ * The value is an index into the OXI App's 100-colour palette (0–99, read across its 10×10 encoder colour picker),
+ * not the 0–15 index the Lua API doc describes. These were picked on the E16 with a colour test script.
  */
 export const LANE_COLOURS = [
   { r: 0, g: 0, b: 0 }, // Lane 1: purple
