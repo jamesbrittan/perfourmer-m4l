@@ -46,7 +46,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -140,7 +140,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -493,7 +493,7 @@ var SPLITS = {
   "2+2": [[1, 2], [3, 4]],
   "1+1+2": [[1], [2], [3, 4]]
 };
-var GROUP_MODES = ["poly", "round-robin", "unison"];
+var GROUP_MODES = ["poly", "round-robin", "unison", "ping-pong", "shuffle"];
 var CHORD_SHAPES = {
   unison: [0],
   "5th": [0, 4],
@@ -529,6 +529,26 @@ function bjorklund(hits, length) {
 }
 var mix = (seed, cycleIndex) => Math.imul(seed + 1, 2654435761) ^ Math.imul(cycleIndex + 1, 2246822507) | 0;
 var clampToMidi = (note) => Math.max(0, Math.min(127, note));
+function turn(mode, size, count, seed) {
+  if (mode === "ping-pong" && size > 2) {
+    const at = count % (2 * size - 2);
+    return at < size ? at : 2 * size - 2 - at;
+  }
+  if (mode !== "shuffle" || size <= 2) return count % size;
+  const round = Math.floor(count / size);
+  const order = shuffledRound(size, round, seed);
+  if (round > 0 && order[0] === shuffledRound(size, round - 1, seed)[size - 1]) [order[0], order[1]] = [order[1], order[0]];
+  return order[count % size];
+}
+function shuffledRound(size, round, seed) {
+  const rng = xoroshiro128plus(mix(~seed, round));
+  const order = Array.from({ length: size }, (_, i) => i);
+  for (let i = size - 1; i > 0; i--) {
+    const j = uniformInt(rng, 0, i);
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
+}
 function degreeToNote(degree, { root, intervals }) {
   const octave = Math.floor(degree / intervals.length);
   const index = degree - octave * intervals.length;
@@ -621,7 +641,7 @@ function createEngine() {
     const { groupMode = "poly", chordShape = "triad" } = lanes[lane];
     if (group.length === 1 || group.length && groupMode !== "poly") {
       if (groupMode === "unison") return group.map((voice) => ({ voice, pitch: toPitch(degree) }));
-      return [{ voice: group[count % group.length], pitch: toPitch(degree) }];
+      return [{ voice: group[turn(groupMode, group.length, count, lanes[lane].seed ?? 0)], pitch: toPitch(degree) }];
     }
     const chord = [...new Set(CHORD_SHAPES[chordShape].map((d) => toPitch(degree + d)))].sort((a, b) => a - b);
     const root = toPitch(degree);

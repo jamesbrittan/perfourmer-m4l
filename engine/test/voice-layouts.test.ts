@@ -79,6 +79,43 @@ describe("Round-robin", () => {
   });
 });
 
+describe("Ping-pong", () => {
+  const cycleVoices = (voices: Split, lanes: number, cycles: number[]) => {
+    const engine = createEngine();
+    engine.configure({ lanes: Array.from({ length: lanes }, () => lane({ hits: 8, length: 8, groupMode: "ping-pong" })) });
+    engine.setVoiceLayout(SPLITS[voices]);
+    return cycles.flatMap((c) => engine.renderCycle(lanes - 1, c).map((e) => e.voice));
+  };
+
+  it("sweeps up and back down the group without repeating the ends", () => {
+    expect(cycleVoices("4", 1, [0, 1])).toEqual([1, 2, 3, 4, 3, 2, 1, 2, 3, 4, 3, 2, 1, 2, 3, 4]);
+    expect(cycleVoices("1+3", 2, [0])).toEqual([2, 3, 4, 3, 2, 3, 4, 3]);
+    expect(cycleVoices("2+2", 2, [0])).toEqual([3, 4, 3, 4, 3, 4, 3, 4]);
+  });
+});
+
+describe("Shuffle", () => {
+  const shuffled = (extra: Partial<LaneParams>, cycles = 8) => {
+    const engine = createEngine();
+    engine.configure({ lanes: [lane({ hits: 8, length: 8, groupMode: "shuffle", ...extra })] });
+    engine.setVoiceLayout(SPLITS["4"]);
+    return Array.from({ length: cycles }, (_, c) => engine.renderCycle(0, c).map((e) => e.voice)).flat();
+  };
+
+  it("plays every Voice once in each round of hits, in an order that changes, never the same Voice twice in a row", () => {
+    const run = shuffled({ seed: 5 });
+    const rounds = Array.from({ length: run.length / 4 }, (_, r) => run.slice(4 * r, 4 * r + 4));
+    for (const round of rounds) expect([...round].sort()).toEqual([1, 2, 3, 4]);
+    expect(new Set(rounds.map((round) => round.join())).size).toBeGreaterThan(3);
+    run.slice(1).forEach((voice, i) => expect(voice).not.toBe(run[i]));
+  });
+
+  it("follows the Seed, so the same song position replays the same order", () => {
+    expect(shuffled({ seed: 5 })).toEqual(shuffled({ seed: 5 }));
+    expect(shuffled({ seed: 5 })).not.toEqual(shuffled({ seed: 6 }));
+  });
+});
+
 describe("Unison", () => {
   it("plays each hit on every Voice of the group", () => {
     const events = render({ split: "2+2", lanes: [lane({ groupMode: "unison", chordShape: "7th" })] }, 0);

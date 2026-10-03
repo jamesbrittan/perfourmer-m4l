@@ -89,8 +89,8 @@ export const SPLITS = {
   "1+1+2": [[1], [2], [3, 4]],
 } as const;
 export type Split = keyof typeof SPLITS;
-/** How a Lane uses a group of more than one Voice. */
-export const GROUP_MODES = ["poly", "round-robin", "unison"] as const;
+/** How a Lane uses a group of more than one Voice (new modes go on the end: sets store the menu index). */
+export const GROUP_MODES = ["poly", "round-robin", "unison", "ping-pong", "shuffle"] as const;
 export type GroupMode = (typeof GROUP_MODES)[number];
 /** Scale-degree intervals stacked on each hit of a poly Lane. */
 export const CHORD_SHAPES = {
@@ -157,6 +157,31 @@ function bjorklund(hits: number, length: number): boolean[] {
 const mix = (seed: number, cycleIndex: number) => (Math.imul(seed + 1, 0x9e3779b1) ^ Math.imul(cycleIndex + 1, 0x85ebca6b)) | 0;
 
 const clampToMidi = (note: number) => Math.max(0, Math.min(127, note));
+
+/** Which of a group's Voices (by position) a moving Group Mode gives the hit numbered `count` since the Reset. */
+function turn(mode: GroupMode, size: number, count: number, seed: number): number {
+  if (mode === "ping-pong" && size > 2) {
+    const at = count % (2 * size - 2);
+    return at < size ? at : 2 * size - 2 - at;
+  }
+  if (mode !== "shuffle" || size <= 2) return count % size; // two Voices can only alternate
+  const round = Math.floor(count / size);
+  const order = shuffledRound(size, round, seed);
+  // the first of a round never repeats the last of the one before (whose last place a swap here never touches)
+  if (round > 0 && order[0] === shuffledRound(size, round - 1, seed)[size - 1]) [order[0], order[1]] = [order[1], order[0]];
+  return order[count % size];
+}
+
+/** A seeded order of 0 … size-1 for one round of a shuffle (Fisher–Yates). */
+function shuffledRound(size: number, round: number, seed: number): number[] {
+  const rng = xoroshiro128plus(mix(~seed, round));
+  const order = Array.from({ length: size }, (_, i) => i);
+  for (let i = size - 1; i > 0; i--) {
+    const j = uniformInt(rng, 0, i);
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
+}
 
 /** A scale degree as a MIDI note: degrees past the Scale's last note carry on into the next octave. */
 function degreeToNote(degree: number, { root, intervals }: Scale): number {
@@ -274,7 +299,9 @@ export function createEngine() {
    * Voice Layout: which Voices play a hit, and at which pitches. A single Voice plays the hit; a poly group plays
    * the Chord Shape, lowest note on the highest-numbered Voice (the bottom of the Perfourmer's panel), doubling
    * the bass when the chord is smaller than the group; round-robin takes the group's Voices in turn, counting
-   * hits since the last Reset; unison plays the hit on every Voice.
+   * hits since the last Reset; ping-pong sweeps up the group and back down (1 2 3 4 3 2 …); shuffle plays every
+   * Voice once per round of hits, in an order drawn from the Seed, never the same Voice twice in a row; unison
+   * plays the hit on every Voice.
    */
   function allocate(
     lane: number,
@@ -287,7 +314,7 @@ export function createEngine() {
     const { groupMode = "poly", chordShape = "triad" } = lanes[lane];
     if (group.length === 1 || (group.length && groupMode !== "poly")) {
       if (groupMode === "unison") return group.map((voice) => ({ voice, pitch: toPitch(degree) }));
-      return [{ voice: group[count % group.length], pitch: toPitch(degree) }];
+      return [{ voice: group[turn(groupMode, group.length, count, lanes[lane].seed ?? 0)], pitch: toPitch(degree) }];
     }
     const chord = [...new Set(CHORD_SHAPES[chordShape].map((d) => toPitch(degree + d)))].sort((a, b) => a - b);
     const root = toPitch(degree);
