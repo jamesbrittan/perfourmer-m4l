@@ -92,7 +92,8 @@ HELP = {
                    "Takes effect from the next Cycle."),
     "Chord Shape": ("Chord Shape", "For poly with two or more Voices (dimmed otherwise): scale-degree intervals stacked "
                     "on each hit, lowest note on the highest-numbered Voice (the bottom of the Perfourmer's panel). "
-                    "Takes effect from the next Cycle."),
+                    "A chord smaller than the group doubles its notes at the same pitch (unison plays one pitch on "
+                    "every Voice); set each Voice's octave on the Perfourmer. Takes effect from the next Cycle."),
     "Reset Bars": ("Reset", "Realigns every Lane (rhythm and Pitch Cycle) to its start every N bars of Live's time "
                    "signature. 0 = never. Cycles keep counting across Resets, so Mutation keeps evolving."),
     "Voicing Matrix": ("Voicing Matrix", "Which Voices the Lane plays. Each Voice belongs to one Lane at most: "

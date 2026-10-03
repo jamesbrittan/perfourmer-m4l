@@ -39,14 +39,16 @@ describe("Poly groups", () => {
     expect(byVoice(seventh)).toEqual({ 4: 60, 3: 64, 2: 67, 1: 71 });
   });
 
-  it("double the bass an octave down when the chord is smaller than the group", () => {
+  it("double the chord's notes at the same pitch, root first, when the chord is smaller than the group", () => {
     const triad = render({ split: "4", lanes: [lane({ chordShape: "triad" })] }, 0);
-    expect(byVoice(triad)).toEqual({ 4: 48, 3: 60, 2: 64, 1: 67 });
+    expect(byVoice(triad)).toEqual({ 4: 60, 3: 60, 2: 64, 1: 67 });
+    const fifth = render({ split: "4", lanes: [lane({ chordShape: "5th" })] }, 0);
+    expect(byVoice(fifth)).toEqual({ 4: 60, 3: 60, 2: 67, 1: 67 });
   });
 
-  it("double an octave above the root instead when an octave down would be too low", () => {
-    const low = render({ split: "4", lanes: [lane({ chordShape: "triad", octave: -3 })] }, 0);
-    expect(byVoice(low)).toEqual({ 4: 24, 3: 28, 2: 31, 1: 36 });
+  it("play a unison Chord Shape at one pitch on every Voice, leaving octaves to the synth", () => {
+    const unison = render({ split: "1+3", lanes: [lane(), lane({ chordShape: "unison", pitchCycle: [3] })] }, 1);
+    expect(byVoice(unison)).toEqual({ 4: 65, 3: 65, 2: 65 });
   });
 
   it("drop the top notes of a chord bigger than the group", () => {

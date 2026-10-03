@@ -84,7 +84,7 @@ The Hub interface adheres to native Ableton Live 12 device design (169 px tall) 
   - `poly`: Plays chords across the assigned voices.
   - `round-robin`: Cycles successive hits across voices.
   - `unison`: Triggers all assigned voices simultaneously on the same pitch.
-- **Chord Shape**: When in `poly` mode, selects the interval stack (`unison`, `octave`, `fifth`, `triad`, `suspended`, `seventh`, `quartal`, `ninth`). Chords invert automatically to assign the lowest note to the highest voice channel, matching the Perfourmer's physical panel layout.
+- **Chord Shape**: When in `poly` mode, selects the interval stack (`unison`, `octave`, `fifth`, `triad`, `suspended`, `seventh`, `quartal`, `ninth`). Chords invert automatically to assign the lowest note to the highest voice channel, matching the Perfourmer's physical panel layout. A chord with fewer notes than Voices doubles its notes at the same pitch rather than adding octaves, so each Voice's octave stays under your control on the synth.
 
 ---
 

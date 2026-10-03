@@ -67,7 +67,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -161,7 +161,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -829,7 +829,6 @@ var CHORD_SHAPES = {
   "open triad": [0, 4, 9],
   octaves: [0, 7, 14, 21]
 };
-var LOWEST_BASS = 24;
 var VIEW_ROW = 16;
 var MIDDLE_C = 60;
 var CHANGE_LEAD = 240;
@@ -945,17 +944,10 @@ function createEngine() {
       if (groupMode === "unison") return group.map((voice) => ({ voice, pitch: toPitch(degree) }));
       return [{ voice: group[count % group.length], pitch: toPitch(degree) }];
     }
-    const chord = [...new Set(CHORD_SHAPES[chordShape].map((d) => toPitch(degree + d)))].sort((a, b) => a - b);
-    const root = toPitch(degree);
-    for (let up = 12; chord.length < group.length; up += 12) {
-      const below = chord[0] - 12;
-      const fill = below >= LOWEST_BASS && !chord.includes(below) ? below : root + up;
-      if (fill <= 127 && !chord.includes(fill)) chord.push(fill);
-      else if (fill > 127) break;
-      chord.sort((a, b) => a - b);
-    }
+    const shape = [...new Set(CHORD_SHAPES[chordShape].map((d) => toPitch(degree + d)))].sort((a, b) => a - b);
+    const chord = group.map((_, i) => shape[i % shape.length]).sort((a, b) => a - b);
     const highestFirst = [...group].reverse();
-    return chord.slice(0, group.length).map((pitch, i) => ({ voice: highestFirst[i], pitch }));
+    return chord.map((pitch, i) => ({ voice: highestFirst[i], pitch }));
   }
   function laneVoices(lane) {
     return voiceLayout[lane] ?? [];
