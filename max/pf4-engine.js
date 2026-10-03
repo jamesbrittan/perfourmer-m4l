@@ -67,7 +67,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -161,7 +161,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -834,7 +834,6 @@ var VIEW_ROW = 16;
 var MIDDLE_C = 60;
 var CHANGE_LEAD = 240;
 var RETRIGGER_TICKS = 6;
-var LEGATO_TICKS = 6;
 var C_MAJOR = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
 function bjorklund(hits, length) {
   hits = Math.max(0, Math.min(hits, length));
@@ -1012,8 +1011,7 @@ function createEngine() {
       const start = at(e);
       let length = e.onset + e.duration - start;
       const next = following.find((n) => n.voice === e.voice && n.start > start);
-      if (next && next.pitch === e.pitch) length = Math.min(length, next.start - start - RETRIGGER_TICKS);
-      else if (next && start + length >= next.start) length = next.start - start + LEGATO_TICKS;
+      if (next) length = Math.min(length, next.start - start - RETRIGGER_TICKS);
       const slot = start / gridTicks;
       slots.set(slot, [...slots.get(slot) ?? [], [e.voice, e.pitch, e.velocity, Math.max(gridTicks, length)]]);
     }

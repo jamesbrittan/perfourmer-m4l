@@ -63,7 +63,7 @@ The Hub interface adheres to native Ableton Live 12 device design (169 px tall) 
 - **Octave**: Shifts the octave range (-3 to +3).
 
 ### Tab 3: Feel
-- **Gate %**: Note duration as a percentage of step length (legato ties at 100%).
+- **Gate %**: Note duration as a percentage of step length (at 100% each note lasts until just before the next).
 - **Velocity**: Base MIDI velocity (1–127).
 - **Accent**: Velocity boost applied to accented hits.
 
