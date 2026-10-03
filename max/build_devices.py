@@ -117,6 +117,11 @@ HELP = {
                                        "Takes effect from each Lane's next Cycle."),
     "Randomise": ("Randomise Lane", "Rolls new random values for this Lane across Rhythm, Pitch, and Evolution. "
                                     "Takes effect from the next Cycle."),
+    "Ratchet": ("Ratchet", "How many quick pulses a ratcheted hit plays across its step (2–4), each retriggering "
+                           "the note. Heard from the next note."),
+    "Ratchet %": ("Ratchet %", "The chance each hit plays as a ratchet burst. 0 = never, 100 = every hit. Which hits "
+                               "burst follows the Seed, so it repeats from the same song position and holds while "
+                               "Frozen. Heard from the next note."),
     "Undo Randomise": ("Undo Randomise", "Restores this Lane's controls to the values from before the last roll."),
     "Randomise Rhythm": ("Randomise Rhythm", "Rolls new Hits, Length, and Rotate values for this Lane. "
                                              "Takes effect from the next Cycle."),
@@ -473,9 +478,11 @@ def build_hub():
     P.comment("Preset", 595, 26, 45, tab=1)
 
     # Tab 2 (Feel) headers
-    P.comment("Gate %", 325, 32, 48, tab=2)
-    P.comment("Velocity", 405, 32, 48, tab=2)
-    P.comment("Accent", 485, 32, 48, tab=2)
+    P.comment("Gate %", 310, 32, 44, tab=2)
+    P.comment("Velocity", 358, 32, 46, tab=2)
+    P.comment("Accent", 406, 32, 44, tab=2)
+    P.comment("Ratchet", 460, 32, 44, tab=2)
+    P.comment("Ratch %", 508, 32, 44, tab=2)
 
     # Tab 3 (Evolve) headers
     P.comment("Prob %", 310, 32, 36, tab=3)
@@ -586,13 +593,18 @@ def build_hub():
 
         # --- Tab 2: Dynamics / Articulation (Feel)
         gate_d, vel_d, acc_d = d["gate"], d["velocity"], d["accent"]
+        rat_d, ratp_d = d["ratchet"], d["ratchetProbability"]
         P.comment(f"L{n + 1}", 285, ty, 20, tab=2)
-        gate = P.param("live.numbox", f"L{n + 1} Gate", 325, ty, *R["gate"], gate_d, w=48, h=18, short="Gate %", tab=2)
-        vel = P.param("live.numbox", f"L{n + 1} Velocity", 405, ty, *R["velocity"], vel_d, w=48, h=18, short="Vel", tab=2)
-        acc = P.param("live.numbox", f"L{n + 1} Accent", 485, ty, *R["accent"], acc_d, w=48, h=18, short="Accent", tab=2)
-        artic = P.obj(f"pak {gate_d} {vel_d} {acc_d}", lx, Y + 850, ins=3)
+        gate = P.param("live.numbox", f"L{n + 1} Gate", 310, ty, *R["gate"], gate_d, w=44, h=18, short="Gate %", tab=2)
+        vel = P.param("live.numbox", f"L{n + 1} Velocity", 358, ty, *R["velocity"], vel_d, w=44, h=18, short="Vel", tab=2)
+        acc = P.param("live.numbox", f"L{n + 1} Accent", 406, ty, *R["accent"], acc_d, w=44, h=18, short="Accent", tab=2)
+        rat = P.param("live.numbox", f"L{n + 1} Ratchet", 460, ty, *R["ratchet"], rat_d, w=44, h=18, short="Ratchet",
+                      tab=2)
+        ratp = P.param("live.numbox", f"L{n + 1} Ratchet %", 508, ty, *R["ratchetProbability"], ratp_d, w=44, h=18,
+                       short="Ratch %", tab=2)
+        artic = P.obj(f"pak {gate_d} {vel_d} {acc_d} {rat_d} {ratp_d}", lx, Y + 850, ins=5)
         to_artic = P.obj(f"prepend articulate {n}", lx, Y + 880)
-        for i, box in enumerate((gate, vel, acc)):
+        for i, box in enumerate((gate, vel, acc, rat, ratp)):
             P.c(box, artic, 0, i)
         P.c(artic, to_artic); P.c(to_artic, adapter)
 
