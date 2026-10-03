@@ -83,6 +83,8 @@ The Hub interface adheres to native Ableton Live 12 device design (169 px tall) 
 - **Group Mode**: When a Lane owns 2 or more Voices:
   - `poly`: Plays chords across the assigned voices.
   - `round-robin`: Cycles successive hits across voices.
+  - `ping-pong`: Sweeps successive hits up the voices and back down (1 2 3 4 3 2 …).
+  - `shuffle`: Plays each voice once per round of hits in a seeded order, never the same voice twice in a row.
   - `unison`: Triggers all assigned voices simultaneously on the same pitch.
 - **Chord Shape**: When in `poly` mode, selects the interval stack (`unison`, `octave`, `fifth`, `triad`, `suspended`, `seventh`, `quartal`, `ninth`). Chords invert automatically to assign the lowest note to the highest voice channel, matching the Perfourmer's physical panel layout.
 

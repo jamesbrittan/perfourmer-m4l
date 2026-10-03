@@ -88,7 +88,9 @@ HELP = {
     "Pitch Preset": ("Pitch Preset", "Loads a melodic figure, arpeggio or ostinato into the Lane's Pitch Cycle. "
                     "Changing length or any degree drops back to '—'."),
     "Group Mode": ("Group Mode", "How the Lane uses two or more Voices (dimmed with fewer): poly plays chords, "
-                   "round-robin moves successive hits across the Voices 1 → 4, unison plays every Voice together. "
+                   "round-robin moves successive hits across the Voices 1 → 4, ping-pong sweeps up and back down (1 2 3 4 3 2), "
+                   "shuffle plays each Voice once per round in a Seeded order (never the same Voice twice in a row), "
+                   "unison plays every Voice together. "
                    "Takes effect from the next Cycle."),
     "Chord Shape": ("Chord Shape", "For poly with two or more Voices (dimmed otherwise): scale-degree intervals stacked "
                     "on each hit, lowest note on the highest-numbered Voice (the bottom of the Perfourmer's panel). "
