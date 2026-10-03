@@ -25,7 +25,8 @@ const {
   RANDOM_GROUPS,
   randomSettings,
   // E16 controller
-  rhythmPage,
+  e16Pages,
+  pushEncoder,
   stepEncoder,
   createE16Display,
   decodeDelta,
@@ -95,7 +96,9 @@ function pitchPreset(n, index) {
 }
 
 // Pitch Cycle editor: its length, then all 8 degree boxes (only the first <length> are used)
+const degreeBoxes = Array.from({ length: LANES }, () => []); // all 8, so the E16 can lengthen the Cycle with them
 function pitch(n, length, ...degrees) {
+  degreeBoxes[n] = degrees;
   const chosen = PITCH_PRESETS[chosenPitchPreset[n] - 1];
   if (chosen && !loadingPitchPreset) {
     const matches = chosen.degrees.length === length && chosen.degrees.every((d, i) => d === degrees[i]);
@@ -269,7 +272,7 @@ function undo(n) {
 
 function setControls(n, settings) {
   const send = (control, ...values) => outlet(OUT.controls, n, control, ...values);
-  const { length, hits, rotate, rate, pitchCycle, probability, mutation, seed } = settings;
+  const { length, hits, rotate, rate, pitchCycle, transpose, octave, probability, mutation, seed } = settings;
   if (length !== undefined) send("length", length); // before Hits, whose range follows Length
   if (hits !== undefined) send("hits", hits);
   if (rotate !== undefined) send("rotate", rotate);
@@ -278,6 +281,8 @@ function setControls(n, settings) {
     pitchCycle.slice(0, PITCH_STEPS).forEach((degree, i) => send("degree", i, degree));
     send("pitchLength", Math.min(pitchCycle.length, PITCH_STEPS));
   }
+  if (transpose !== undefined) send("transpose", transpose);
+  if (octave !== undefined) send("octave", octave);
   if (probability !== undefined) send("probability", probability);
   if (mutation !== undefined) send("mutation", mutation);
   if (seed !== undefined) send("seed", seed);
@@ -395,8 +400,11 @@ function bye(deviceId) {
 // (mouse, automation, preset, Randomise) updates the display; only messages
 // that change what the E16 shows are sent.
 
-const e16Page = rhythmPage();
-const e16Display = createE16Display(e16Page);
+const e16 = e16Pages();
+let e16Page = e16.page(0); // the page the E16 shows, as its script reports
+let e16Display = createE16Display(e16Page);
+/** A Lane's settings as the E16 sees them, with the Pitch Cycle editor's degrees past its length. */
+const e16Settings = (n) => ({ ...engine.laneSettings(n), pitchSteps: degreeBoxes[n] });
 let e16Connected = false;
 let e16cs = null;
 // The CCs can reach the Hub by more than one route (the E16's port and the track's input), often both at once. Only
@@ -497,39 +505,48 @@ function e16cc(cc, value) {
     const control = e16Page.encoders[encoder];
     const delta = decodeDelta(value);
     if (!control || delta === 0) return;
-    const result = stepEncoder(e16Page, encoder, delta, engine.laneSettings(control.lane));
+    const result = stepEncoder(e16Page, encoder, delta, e16Settings(control.lane));
     if (!result) return;
-    // the engine first, so the next click steps from the new value
-    engine.setLane(result.lane, result.changes);
-    scheduler.changed(result.lane);
     sendE16Sysex(result.sysex);
     e16Display.sent(result.sysex);
-    setControls(result.lane, result.changes); // the Live controls follow (undo, automation recording)
-    e16Update(); // a shorter Length may have clamped Hits or Rotate
+    if (Object.keys(result.changes).length) e16Apply(result.lane, result.changes);
     return;
   }
-  // Encoder push: push on Rotate resets rotation to 0
+  // Encoder push: back to 0 (Rotate, Transpose, Octave), or load the Pitch Preset shown
   if (cc >= PUSH_CC_BASE && cc < PUSH_CC_BASE + 16) {
-    const control = e16Page.encoders[cc - PUSH_CC_BASE];
-    if (control && control.kind === "rotate") {
-      engine.setLane(control.lane, { rotate: 0 });
-      scheduler.changed(control.lane);
-      setControls(control.lane, { rotate: 0 });
-      e16Update();
+    const encoder = cc - PUSH_CC_BASE;
+    const control = e16Page.encoders[encoder];
+    const result = control && pushEncoder(e16Page, encoder, e16Settings(control.lane));
+    if (!result) return;
+    if (result.pitchPreset) {
+      pitchPreset(result.lane, result.pitchPreset); // as if chosen from the Lane's menu, which follows
+      outlet(OUT.pitchPresetMenus, result.lane, "set", result.pitchPreset);
     }
+    if (Object.keys(result.changes).length) e16Apply(result.lane, result.changes);
+    e16Update();
     return;
   }
-  // Page change: the E16 has cleared its display
+  // Page change: the E16 shows another page, and has cleared its display
   if (cc === PAGE_CC) {
-    e16Display.forget();
+    e16Page = e16.page(value);
+    e16Display = createE16Display(e16Page);
     e16Update();
   }
+}
+
+/** Apply settings an E16 turn or push changed: the engine first, so the next click steps from the new value, then
+ * the Live controls (undo, automation recording). */
+function e16Apply(n, changes) {
+  engine.setLane(n, changes);
+  scheduler.changed(n);
+  setControls(n, changes);
+  e16Update(); // a shorter Length may have clamped Hits or Rotate
 }
 
 /** Send the E16 whatever on its page has changed since it was last sent. */
 function e16Update() {
   if (!e16Connected) return;
-  for (const message of e16Display.update((lane) => engine.laneSettings(lane))) sendE16Sysex(message);
+  for (const message of e16Display.update(e16Settings)) sendE16Sysex(message);
 }
 
 function bang() {
