@@ -12,8 +12,8 @@ describe("Randomising a Lane", () => {
   it("changes only the groups asked for", () => {
     for (const r of rolls(["rhythm"])) expect(Object.keys(r).sort()).toEqual(["hits", "length", "rate", "rotate"]);
     for (const r of rolls(["pitch"])) expect(Object.keys(r)).toEqual(["pitchCycle"]);
-    for (const r of rolls(["evolution"])) expect(Object.keys(r).sort()).toEqual(["mutation", "probability", "seed"]);
-    for (const r of rolls(["rhythm", "pitch", "evolution"])) expect(Object.keys(r)).toHaveLength(8);
+    for (const r of rolls(["evolution"])) expect(Object.keys(r).sort()).toEqual(["mutation", "pitchMutation", "probability", "seed"]);
+    for (const r of rolls(["rhythm", "pitch", "evolution"])) expect(Object.keys(r)).toHaveLength(9);
   });
 
   it("keeps the rhythm usable: Length 3–16, Hits 1 to Length, Rotate inside the Length, common Rates", () => {
@@ -40,11 +40,12 @@ describe("Randomising a Lane", () => {
     }
   });
 
-  it("keeps evolution gentle: Probability 70–100, Mutation 0–60, any Seed", () => {
-    for (const { probability = 0, mutation = 0, seed = 0 } of rolls(["evolution"])) {
+  it("keeps evolution gentle: Probability 70–100, both Mutations 0–60, any Seed", () => {
+    for (const { probability = 0, mutation = 0, pitchMutation = 0, seed = 0 } of rolls(["evolution"])) {
       expect(probability).toBeGreaterThanOrEqual(70);
       expect(probability).toBeLessThanOrEqual(100);
       expect(mutation).toBeLessThanOrEqual(60);
+      expect(pitchMutation).toBeLessThanOrEqual(60);
       expect(seed).toBeLessThanOrEqual(RANGES.seed[1]);
     }
   });

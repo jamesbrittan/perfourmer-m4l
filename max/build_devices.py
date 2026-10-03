@@ -65,9 +65,12 @@ HELP = {
     "Accent": ("Accent", "Velocity added to the first hit of each Cycle; 0 = no accent. Heard from the next note."),
     "Probability": ("Probability", "Chance (%) that each hit sounds, decided per Cycle from the Seed, so the same bars "
                     "replay the same way. Takes effect from the next Cycle."),
-    "Mutation": ("Mutation", "Chance each Cycle that each step and each pitch is redrawn from the Base: 0 = the Base "
-                 "forever, 127 = a new pattern every Cycle. Seeded by song position, so a section replays the same "
-                 "evolution."),
+    "Mutation": ("Rhythm Mutation", "Chance each Cycle that each step is redrawn from the Base (hit or rest): 0 = the "
+                 "Base's rhythm forever, 127 = a new rhythm every Cycle. The pitches still follow the Pitch Cycle unless "
+                 "Pitch Mutation is up. Seeded by song position, so a section replays the same evolution."),
+    "Pitch Mutation": ("Pitch Mutation", "Chance each Cycle that each hit's scale degree is redrawn, within the Pitch "
+                       "Cycle's range ±3 degrees: 0 = the Pitch Cycle as written, 127 = new degrees every Cycle. Never "
+                       "moves a hit. Seeded by song position, like Rhythm Mutation."),
     "Seed": ("Seed", "Chooses which evolution Mutation and Probability follow. Saved with the set, not automatable."),
     "New Seed": ("New Seed", "Picks a new random Seed for this Lane: a different evolution for Mutation and "
                  "Probability, which then replays the same way. Takes effect from the next Cycle."),
@@ -122,7 +125,7 @@ HELP = {
                                              "Takes effect from the next Cycle."),
     "Randomise Pitch": ("Randomise Pitch", "Rolls a new melodic Pitch Cycle and Transpose for this Lane. "
                                            "Takes effect from the next Cycle."),
-    "Randomise Evolution": ("Randomise Evolution", "Rolls new Probability, Mutation, and Seed values for this Lane. "
+    "Randomise Evolution": ("Randomise Evolution", "Rolls new Probability, Rhythm and Pitch Mutation, and Seed values for this Lane. "
                                                    "Takes effect from the next Cycle."),
 }
 
@@ -455,11 +458,12 @@ def build_hub():
     P.comment("Accent", 485, 32, 48, tab=2)
 
     # Tab 3 (Evolve) headers
-    P.comment("Prob %", 310, 32, 36, tab=3)
-    P.comment("Mutate", 352, 32, 36, tab=3)
-    P.comment("Seed", 394, 32, 32, tab=3)
-    P.comment("Capture / Revert / Freeze", 448, 32, 130, tab=3)
-    P.comment("Base", 580, 32, 40, tab=3)
+    P.comment("Prob %", 308, 32, 36, tab=3)
+    P.comment("R-Mut", 344, 32, 34, tab=3)
+    P.comment("P-Mut", 378, 32, 34, tab=3)
+    P.comment("Seed", 412, 32, 32, tab=3)
+    P.comment("Capture / Revert / Freeze", 464, 32, 124, tab=3)
+    P.comment("Base", 588, 32, 40, tab=3)
 
     # Tab 4 (Timbre) headers
     P.comment("VCF Depth", 315, 32, 55, tab=4)
@@ -574,14 +578,17 @@ def build_hub():
         P.c(artic, to_artic); P.c(to_artic, adapter)
 
         # --- Tab 3: Evolution & Capture (Evolve)
-        prob_d, mut_d = d["probability"], d["mutation"]
+        prob_d, mut_d, pmut_d = d["probability"], d["mutation"], d["pitchMutation"]
         dice_button(P, f"L{n + 1} Randomise Evolution", "Rand Evo", 286, ty + 1,
                     f"randomise {n} evolution", adapter, lx + 360, Y + 1100, tab=3)
-        prob = P.param("live.numbox", f"L{n + 1} Probability", 310, ty, *R["probability"], prob_d, w=36, h=18, short="Prob %", tab=3)
-        mut = P.param("live.numbox", f"L{n + 1} Mutation", 352, ty, *R["mutation"], mut_d, w=36, h=18, short="Mutate", tab=3)
-        seed = P.param("live.numbox", f"L{n + 1} Seed", 394, ty, *R["seed"], d["seed"], w=32, h=18, short="Seed",
+        prob = P.param("live.numbox", f"L{n + 1} Probability", 310, ty, *R["probability"], prob_d, w=30, h=18, short="Prob %", tab=3)
+        # Rhythm Mutation keeps the name "Mutation", so sets saved before Pitch Mutation existed keep its value
+        mut = P.param("live.numbox", f"L{n + 1} Mutation", 344, ty, *R["mutation"], mut_d, w=30, h=18, short="R-Mut", tab=3)
+        pmut = P.param("live.numbox", f"L{n + 1} Pitch Mutation", 378, ty, *R["pitchMutation"], pmut_d, w=30, h=18,
+                       short="P-Mut", tab=3)
+        seed = P.param("live.numbox", f"L{n + 1} Seed", 412, ty, *R["seed"], d["seed"], w=30, h=18, short="Seed",
                        stored_only=True, tab=3)
-        dice = P.add("live.text", 429, ty + 1, w=16, h=16, ins=1, outs=2, text="", texton="", mode=0,
+        dice = P.add("live.text", 445, ty + 1, w=16, h=16, ins=1, outs=2, text="", texton="", mode=0,
                      parameter_enable=1, tab=3, usepicture=1, usesvgviewbox=1, remapsvgcolors=1,
                      pictures=["pf4-dice.svg", "pf4-dice.svg"], rounded=0.0,
                      saved_attribute_attributes={"valueof": {
@@ -589,17 +596,17 @@ def build_hub():
                          "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
         new_seed = P.obj("random 1000", lx + 200, Y + 820, ins=2)
         P.c(dice, new_seed); P.c(new_seed, seed)
-        evo = P.obj(f"pak {prob_d} {mut_d} {d['seed']}", lx + 150, Y + 850, ins=3)
+        evo = P.obj(f"pak {prob_d} {mut_d} {pmut_d} {d['seed']}", lx + 150, Y + 850, ins=4)
         to_evo = P.obj(f"prepend evolve {n}", lx + 150, Y + 880)
-        for i, box in enumerate((prob, mut, seed)):
+        for i, box in enumerate((prob, mut, pmut, seed)):
             P.c(box, evo, 0, i)
         P.c(evo, to_evo); P.c(to_evo, adapter)
 
-        capture_btn = P.add("live.text", 448, ty, w=44, h=18, ins=1, outs=2, text="Capture", texton="Capture", mode=0,
+        capture_btn = P.add("live.text", 464, ty, w=42, h=18, ins=1, outs=2, text="Capture", texton="Capture", mode=0,
                             parameter_enable=1, tab=3, saved_attribute_attributes={"valueof": {
                                 "parameter_longname": f"L{n + 1} Capture", "parameter_shortname": "Capture",
                                 "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
-        revert_btn = P.add("live.text", 494, ty, w=40, h=18, ins=1, outs=2, text="Revert", texton="Revert", mode=0,
+        revert_btn = P.add("live.text", 508, ty, w=38, h=18, ins=1, outs=2, text="Revert", texton="Revert", mode=0,
                            parameter_enable=1, tab=3, saved_attribute_attributes={"valueof": {
                                "parameter_longname": f"L{n + 1} Revert", "parameter_shortname": "Revert",
                                "parameter_type": 2, "parameter_enum": ["off", "on"], "parameter_mmax": 1}})
@@ -609,12 +616,12 @@ def build_hub():
         P.c(revert_btn, rev_action); P.c(rev_action, adapter)
 
         # Freeze: a toggle (so it records as automation), outputting 1/0
-        freeze_btn = P.param("live.text", f"L{n + 1} Freeze", 536, ty, 0, 1, 0, w=40, h=18, short="Freeze", tab=3,
+        freeze_btn = P.param("live.text", f"L{n + 1} Freeze", 548, ty, 0, 1, 0, w=38, h=18, short="Freeze", tab=3,
                              text="Freeze", texton="Frozen", mode=1)
         to_freeze = P.obj(f"prepend freeze {n}", lx + 330, Y + 880)
         P.c(freeze_btn, to_freeze); P.c(to_freeze, adapter)
 
-        base_readout = P.add("comment", 580, ty + 2, w=66, h=14, text="Euclidean", fontsize=9, ins=1, outs=0, tab=3)
+        base_readout = P.add("comment", 588, ty + 2, w=58, h=14, text="Euclidean", fontsize=9, ins=1, outs=0, tab=3)
         P.c(readouts, base_readout, LANES + n)
 
         # --- Tab 4: Timbre LFOs (VCF cutoff & PWM)
@@ -666,10 +673,11 @@ def build_hub():
         P.c(lane, prep); P.c(prep, adapter)
 
         # Randomise / Undo: "<control> <value>" for this Lane, to the controls themselves
-        names = ["length", "hits", "rotate", "rate", "degree", "pitchLength", "probability", "mutation", "seed"]
+        names = ["length", "hits", "rotate", "rate", "degree", "pitchLength", "probability", "mutation",
+                 "pitchMutation", "seed"]
         to_control = P.obj("route " + " ".join(names), lx, Y + 1130, ins=2, outs=len(names) + 1)
         P.c(control_lanes, to_control, n)
-        for i, box in enumerate((length, hits, rotate, rate, None, plen, prob, mut, seed)):
+        for i, box in enumerate((length, hits, rotate, rate, None, plen, prob, mut, pmut, seed)):
             if box:
                 P.c(to_control, box, i)
         to_degree = P.obj("route " + " ".join(str(i) for i in range(PITCH_STEPS)), lx, Y + 1160, ins=2,
