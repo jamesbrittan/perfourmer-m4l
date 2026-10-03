@@ -63,6 +63,9 @@ HELP = {
              "each note ties into the next (legato; glides if the Perfourmer's Glide is up). Heard from the next note."),
     "Velocity": ("Velocity", "Velocity of every note (1–127). Heard from the next note."),
     "Accent": ("Accent", "Velocity added to the first hit of each Cycle; 0 = no accent. Heard from the next note."),
+    "Swing": ("Swing %", "Delays every other step: where the offbeat of each pair of steps falls, as a % of the pair. "
+              "50 = straight, 67 = triplet feel, 75 = dotted. The pairs follow the song's grid, so Lanes at the same "
+              "Rate swing together whatever their Length. Heard from the next note."),
     "Probability": ("Probability", "Chance (%) that each hit sounds, decided per Cycle from the Seed, so the same bars "
                     "replay the same way. Takes effect from the next Cycle."),
     "Mutation": ("Mutation", "Chance each Cycle that each step and each pitch is redrawn from the Base: 0 = the Base "
@@ -453,6 +456,7 @@ def build_hub():
     P.comment("Gate %", 325, 32, 48, tab=2)
     P.comment("Velocity", 405, 32, 48, tab=2)
     P.comment("Accent", 485, 32, 48, tab=2)
+    P.comment("Swing %", 565, 32, 48, tab=2)
 
     # Tab 3 (Evolve) headers
     P.comment("Prob %", 310, 32, 36, tab=3)
@@ -562,14 +566,15 @@ def build_hub():
             P.c(unpack_pitch, step, i + 1)
 
         # --- Tab 2: Dynamics / Articulation (Feel)
-        gate_d, vel_d, acc_d = d["gate"], d["velocity"], d["accent"]
+        gate_d, vel_d, acc_d, swing_d = d["gate"], d["velocity"], d["accent"], d["swing"]
         P.comment(f"L{n + 1}", 285, ty, 20, tab=2)
         gate = P.param("live.numbox", f"L{n + 1} Gate", 325, ty, *R["gate"], gate_d, w=48, h=18, short="Gate %", tab=2)
         vel = P.param("live.numbox", f"L{n + 1} Velocity", 405, ty, *R["velocity"], vel_d, w=48, h=18, short="Vel", tab=2)
         acc = P.param("live.numbox", f"L{n + 1} Accent", 485, ty, *R["accent"], acc_d, w=48, h=18, short="Accent", tab=2)
-        artic = P.obj(f"pak {gate_d} {vel_d} {acc_d}", lx, Y + 850, ins=3)
+        swing = P.param("live.numbox", f"L{n + 1} Swing", 565, ty, *R["swing"], swing_d, w=48, h=18, short="Swing %", tab=2)
+        artic = P.obj(f"pak {gate_d} {vel_d} {acc_d} {swing_d}", lx, Y + 850, ins=4)
         to_artic = P.obj(f"prepend articulate {n}", lx, Y + 880)
-        for i, box in enumerate((gate, vel, acc)):
+        for i, box in enumerate((gate, vel, acc, swing)):
             P.c(box, artic, 0, i)
         P.c(artic, to_artic); P.c(to_artic, adapter)
 

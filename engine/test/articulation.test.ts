@@ -100,3 +100,36 @@ describe("A hit exactly where a Reset falls", () => {
     expect(engine.renderCycle(0, 5).map((e) => Math.round(e.onset))).toEqual([0]);
   });
 });
+
+describe("Swing", () => {
+  const onsets = (lane: Partial<LaneParams>, cycleIndex = 0) => cycle(lane, cycleIndex).map((e) => e.onset);
+  const steady = { hits: 4, length: 4 };
+
+  it("at 50% plays straight", () => {
+    expect(cycle({ ...steady, swing: 50 })).toEqual(cycle(steady));
+  });
+
+  it("delays every other step of the song's grid by a share of a step: 75% puts the offbeat three quarters through the pair", () => {
+    expect(onsets({ ...steady, swing: 75 })).toEqual([0, 180, 240, 420]);
+    expect(onsets({ ...steady, swing: 75, rate: "1/8" })).toEqual([0, 360, 480, 840]);
+  });
+
+  it("follows the song's grid, not the Cycle's, so an odd-length Lane swings the same steps of the bar", () => {
+    // Cycle 1 of a 3-step Lane starts on song step 3, an offbeat
+    expect(onsets({ hits: 3, length: 3, swing: 75 }, 1)).toEqual([60, 120, 300]);
+  });
+
+  it("at Gate 100% still ties each note into the next one", () => {
+    const events = cycle({ ...steady, swing: 75, gate: 100 });
+    expect(events.map((e) => e.onset + e.duration)).toEqual([180, 240, 420, 480]);
+  });
+
+  it("leaves the pattern view on the steps", () => {
+    const view = (swing: number) => {
+      const engine = createEngine();
+      engine.configure({ lanes: [{ hits: 3, length: 8, rotate: 1, swing }] });
+      return engine.laneView(0, 0).rows;
+    };
+    expect(view(75)).toEqual(view(50));
+  });
+});
