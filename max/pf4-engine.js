@@ -46,7 +46,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -140,7 +140,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -287,8 +287,10 @@ var HUB_OUTLETS = {
   // "<lane> <control> <value>" to move a Lane's controls (Randomise and its Undo)
   pitchPresetBoxes: 15,
   // "<lane> <length> <deg0> ... <deg7>" from a Pitch Preset
-  pitchPresetMenus: 16
+  pitchPresetMenus: 16,
   // "<lane> set 0": the Pitch Preset menu back to "—"
+  endNotes: 17
+  // "end <voice>": the Voice ends the notes it is holding (its Lane was muted)
 };
 var FREEZE_OFF = -1;
 var FREEZE_BASE = -2;
@@ -584,7 +586,11 @@ function createEngine() {
     });
     return sounding;
   }
+  function silent(lane) {
+    return !!lanes[lane].mute || !lanes[lane].solo && lanes.some((l) => l.solo);
+  }
   function renderCycle(lane, cycleIndex) {
+    if (silent(lane)) return [];
     const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0 } = lanes[lane];
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
@@ -740,6 +746,8 @@ function createEngine() {
     resetTicks: () => resetTicks,
     locate,
     renderCycle,
+    /** Whether the Lane is muted, or silenced by another Lane's Solo. */
+    silent,
     /** The Voices a Lane drives (after any pending Voice Layout change). */
     laneVoices,
     /** Voicing Matrix click: put a Voice on a Lane, taking it off any other Lane, or take it off. songTicks: the
@@ -774,7 +782,7 @@ function createEngine() {
       const step = Math.floor(offsetTicks / stepTicks(lane));
       const key = `${cycleIndex}|${resetTicks}|${basesChanged}|${JSON.stringify(lanes[lane])}`;
       const cached = views.get(lane);
-      if (cached?.key === key) return { ...cached.view, step };
+      if (cached?.key === key) return { ...cached.view, step, silent: silent(lane) };
       const heard = cycleHits(lane, cycleIndex);
       const onsets = new Set(heard.map((h) => Math.round(h.onset / stepTicks(lane))));
       const steps = Array.from({ length: lanes[lane].length }, (_, i) => onsets.has(i));
@@ -787,7 +795,7 @@ function createEngine() {
         captureDepth: active(lane)?.stack.length ?? 0
       };
       views.set(lane, { key, view });
-      return { ...view, step };
+      return { ...view, step, silent: silent(lane) };
     },
     /** Make the Cycle's sounding pattern the Lane's new Base (the previous one is kept for Revert). */
     capture(lane, cycleIndex) {

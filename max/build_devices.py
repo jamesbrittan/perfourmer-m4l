@@ -109,7 +109,12 @@ HELP = {
                       "on Push."),
     "readout:Waiting": ("Voices found", "The Voice devices found in the rack after the Hub, and any missing or "
                         "duplicated Voice numbers."),
-    "readout:pattern": ("Pattern", "The Lane's current Cycle as it plays: ● hit, · rest; the playhead is the cyan ◉ (a hit) or ○ (a rest)."),
+    "readout:pattern": ("Pattern", "The Lane's current Cycle as it plays: ● hit, · rest; the playhead is the cyan ◉ (a hit) or ○ (a rest). "
+                        "Hollow hits (○) mean the Lane is muted or silenced by another Lane's Solo."),
+    "Mute": ("Mute", "Silences the Lane at once (its notes end straight away) while it keeps running: Mutation and the "
+                     "Pitch Cycle carry on unheard, so unmuting brings it back where the song is. Mute wins over Solo."),
+    "Solo": ("Solo", "While any Lane is soloed, only soloed Lanes are heard; the others keep running silently. Several "
+                     "Lanes can be soloed at once."),
     "readout:voices": ("Lane Voices", "Which Voices this Lane drives, and how (see Voices and Group Mode)."),
     "readout:setup": ("Perfourmer setup", "Set the Perfourmer once: Play Mode M1, synth channels 1–4 on MIDI "
                       "channels 1–4, and Edit 3 (aftertouch → cutoff) on. The Hub does all voice allocation."),
@@ -258,6 +263,9 @@ class Patch:
 
 
 PLAYHEAD_COLOUR = [0.2, 0.85, 1.0, 1.0]  # the pattern view's playhead: bright cyan, unlike Live's orange accents
+MUTE_COLOUR = [1.0, 0.8, 0.2, 1.0]  # Mute and Solo toggles when on: yellow and blue
+SOLO_COLOUR = [0.35, 0.65, 1.0, 1.0]
+PATTERN_X, PATTERN_W = 56, 180  # the pattern view, right of each Lane's label and Mute/Solo toggles
 def from_engine(expression):
     """A value from the built engine bundle (e.g. menu choices), so the devices can't drift from the engine."""
     script = f'const engine = require("./pf4-engine.js"); console.log(JSON.stringify({expression}))'
@@ -359,6 +367,7 @@ def build_hub():
     hub_in = P.obj(f"receive {HUB_BUS}", 200, Y - 30, ins=0)
     P.c(adapter, table, OUT["table"], 0); P.c(adapter, pending, OUT["pending"]); P.c(hub_in, adapter)
     P.c(table, shared_notes); P.c(shared_notes, bus)
+    P.c(adapter, bus, OUT["endNotes"])  # "end <voice>": a muted Lane's Voices end their notes at once
 
     # --- Permanent Left Section (x = 0..275, y = 0..169)
     # Global Controls: Reset
@@ -374,7 +383,7 @@ def build_hub():
     P.c(adapter, control_lanes, OUT["controls"])
 
     # Section header
-    P.comment("Pattern", 28, 32, 50)
+    P.comment("Pattern", PATTERN_X, 32, 50)
 
     # Captured Bases pattr (stored only)
     player_state = P.obj(f"dict {PLAYER_DICT}", 1500, Y, ins=2, outs=4)
@@ -488,12 +497,20 @@ def build_hub():
         # Permanent Left: Lane label & broad 252px Pattern glyphs (16 steps/line). Menlo on purpose: the steps must line
         # up in columns across Lanes, and Ableton Sans gives ● and · different widths; all other text is Ableton Sans
         P.comment(f"L{n + 1}", 6, ry + 3, 18)
+        # Mute and Solo toggles (so they can be automated and mapped), coloured like Live's own when on
+        for k, (kind, colour) in enumerate((("Mute", MUTE_COLOUR), ("Solo", SOLO_COLOUR))):
+            toggle = P.param("live.text", f"L{n + 1} {kind}", 24 + 15 * k, ry + 3, 0, 1, 0, w=14, h=14, short=kind,
+                             text=kind[0], texton=kind[0], mode=1, fontsize=8.0, bgoncolor=colour,
+                             activebgoncolor=colour, textoncolor=[0.1, 0.1, 0.1, 1.0],
+                             activetextoncolor=[0.1, 0.1, 0.1, 1.0])
+            to_toggle = P.obj(f"prepend {kind.lower()} {n}", lx + 60 * k, Y + 1130)
+            P.c(toggle, to_toggle); P.c(to_toggle, adapter)
         initial_dots = " ".join(["·"] * min(16, len_d))
-        view = P.add("comment", 28, ry, w=212, h=20, text=initial_dots,
+        view = P.add("comment", PATTERN_X, ry, w=PATTERN_W, h=20, text=initial_dots,
                      fontname="Menlo", fontsize=9.0, ins=1, outs=0)
         P.c(patterns, view, n)
         # the playhead, drawn over the pattern in its own colour (bright cyan, unlike Live's orange accents)
-        head = P.add("comment", 28, ry, w=212, h=20, text="\u00a0", fontname="Menlo", fontsize=9.0, fontface=1,
+        head = P.add("comment", PATTERN_X, ry, w=PATTERN_W, h=20, text="\u00a0", fontname="Menlo", fontsize=9.0, fontface=1,
                      textcolor=PLAYHEAD_COLOUR, ins=1, outs=0)
         P.c(patterns, head, LANES + n)
         if n < LANES - 1:
@@ -776,7 +793,7 @@ def build_voice():
     V.comment("= chain number; set this chain's External Instrument to the same MIDI channel", 4, 48, 170)
 
     rcv = V.obj(f"receive {VOICE_BUS}", 4, 200, ins=0)
-    route = V.obj("route rollcall touch cc1 stop", 4, 230, ins=2, outs=5)
+    route = V.obj("route rollcall touch cc1 stop end", 4, 230, ins=2, outs=6)
     V.c(rcv, route)
     brain = V.codebox(embedded("pf4-voice.js"), 400, 600)
     rc = V.msg("rollcall", 400, 260)
@@ -796,9 +813,13 @@ def build_voice():
     pk = V.obj("pack 0 0", 4, 490, ins=2)
     fmt = V.obj("midiformat 1", 4, 520, ins=7, outs=2)
     out = V.obj("midiout", 4, 550, ins=1, outs=0)
-    V.c(route, split, 4)
+    V.c(route, split, 5)
     end_all = V.msg("stop", 60, 440)  # the transport stopped: makenote ends every note it is holding now
     V.c(route, end_all, 3); V.c(end_all, make)
+    # "end <voice>": this Voice's Lane was muted, so end the notes it is holding now
+    end_mine = V.obj("== 1", 60, 380, ins=2)
+    end_now = V.obj("sel 1", 60, 410, ins=2, outs=2)
+    V.c(route, end_mine, 4); V.c(end_mine, end_now); V.c(end_now, end_all)
     V.c(split, who, 1); V.c(who, mine); V.c(mine, gate, 0, 0)   # right first: is it for this Voice?
     V.c(split, body, 0); V.c(body, gate, 1, 1)                  # then pass [pitch velocity length]
     V.c(gate, tempo_first); V.c(tempo_first, tempo, 1); V.c(tempo, to_ms, 4, 1)
@@ -821,7 +842,7 @@ def build_voice():
             V.c(g, as_cc); V.c(as_cc, fmt, 0, 2)
         else:
             V.c(g, fmt, 0, fmt_inlet)
-    V.c(voice, mine, 0, 1); V.c(voice, fmt, 0, 6); V.c(voice, brain)
+    V.c(voice, mine, 0, 1); V.c(voice, end_mine, 0, 1); V.c(voice, fmt, 0, 6); V.c(voice, brain)
     here = V.obj("live.thisdevice", 400, 200, ins=1, outs=3)
     V.c(here, brain); V.c(brain, voice)
     V.save_amxd("PF4 Voice.amxd", 180)

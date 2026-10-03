@@ -274,6 +274,26 @@ function setControls(n, settings) {
   if (seed !== undefined) send("seed", seed);
 }
 
+// Mute and Solo toggles (0/1): heard from the next note. A Lane that falls silent ends the notes its Voices are
+// holding at once; one that comes back plays from its next note. Soloing one Lane can silence or free every other.
+function mute(n, on) {
+  setSilence(n, { mute: Boolean(Number(on)) });
+}
+
+function solo(n, on) {
+  setSilence(n, { solo: Boolean(Number(on)) });
+}
+
+function setSilence(n, change) {
+  const before = Array.from({ length: LANES }, (_, m) => engine.silent(m));
+  engine.setLane(n, change);
+  for (let m = 0; m < LANES; m++) {
+    if (engine.silent(m) === before[m]) continue;
+    scheduler.changedNow(m);
+    if (engine.silent(m)) for (const v of engine.laneVoices(m)) outlet(OUT.endNotes, "end", v);
+  }
+}
+
 // Group Mode and Chord Shape (menu indices): from the Lane's next Cycle
 function group(n, modeIndex, shapeIndex) {
   engine.setLane(n, { groupMode: GROUP_MODES[modeIndex], chordShape: Object.keys(CHORD_SHAPES)[shapeIndex] });
@@ -391,16 +411,18 @@ function where(songTicks) {
   if (scheduler.playing) engine.retireVoiceLayout(songTicks);
   scheduler.poll(songTicks);
   for (let n = 0; n < LANES; n++) {
-    const { cycleIndex, step, rows, mutated, captureDepth } = engine.laneView(n, songTicks);
+    const { cycleIndex, step, rows, mutated, captureDepth, silent } = engine.laneView(n, songTicks);
     const { length } = engine.laneSettings(n);
     outlet(OUT.readouts, n, "set", `Cycle ${cycleIndex + 1} · step ${step + 1}/${length}${mutated ? " · mutated" : ""}`);
     outlet(OUT.readouts, LANES + n, "set", captureDepth ? `captured${captureDepth > 1 ? ` ×${captureDepth}` : ""}` : "Euclidean");
-    // pattern view: ● hit, · rest; the playhead step (◉ hit, ○ rest) goes on an overlay in its own colour, and the
-    // pattern leaves a gap under it. No-break spaces pad both, so Max keeps leading blanks and the columns line up
+    // pattern view: ● hit (○ while the Lane is silent), · rest; the playhead step (◉ hit, ○ rest) goes on an overlay
+    // in its own colour, and the pattern leaves a gap under it. No-break spaces pad both, so Max keeps leading blanks
+    // and the columns line up
     const gap = "\u00a0";
     const draw = (glyph) =>
       rows.map((row, r) => row.map((hit, i) => glyph(hit, r * rows[0].length + i === step)).join(gap)).join("\n");
-    outlet(OUT.patterns, n, "set", draw((hit, playhead) => (playhead ? gap : hit ? "●" : "·")));
+    const hitGlyph = silent ? "○" : "●";
+    outlet(OUT.patterns, n, "set", draw((hit, playhead) => (playhead ? gap : hit ? hitGlyph : "·")));
     outlet(OUT.patterns, LANES + n, "set", draw((hit, playhead) => (playhead ? (hit ? "◉" : "○") : gap)));
   }
 }

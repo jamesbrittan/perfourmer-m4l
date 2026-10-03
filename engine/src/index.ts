@@ -59,7 +59,9 @@ export const RATES = Object.keys(RATE_TICKS) as Rate[];
  * probability: % chance each hit sounds; mutation: 0 (the Base every Cycle) to 127 (a new pattern every Cycle);
  * seed: picks the path Mutation and probability take.
  * freeze: hold one Cycle, repeating it exactly (its Mutation and probability draws included) whatever Cycle is due;
- * "base" holds the Base without Mutation or probability (a Capture while frozen makes the frozen Cycle the Base). */
+ * "base" holds the Base without Mutation or probability (a Capture while frozen makes the frozen Cycle the Base).
+ * mute: the Lane plays nothing but keeps running (its Cycles, Mutation and Pitch Cycle carry on unheard); solo: while
+ * any Lane is soloed, only soloed Lanes play. Mute wins over Solo. */
 export type LaneParams = {
   hits: number;
   length: number;
@@ -77,6 +79,8 @@ export type LaneParams = {
   velocity?: number;
   accent?: number;
   freeze?: number | "base";
+  mute?: boolean;
+  solo?: boolean;
 };
 /** Live's global scale: root 0–11 (C = 0) and the semitone intervals of its notes. */
 export type Scale = { root: number; intervals: number[] };
@@ -123,8 +127,16 @@ export type VoiceLayout = readonly (readonly number[])[];
  * device plays them with makenote, so every note ends by itself. */
 export type Slot = { slot: number; notes: [number, number, number, number][] };
 /** What a Lane shows at a song position: its Cycle, the playhead step (from 0), the Cycle's steps in rows of 16
- * (true = a hit sounds), whether Mutation or probability changed it from the Base, and the Capture depth. */
-export type LaneView = { cycleIndex: number; step: number; rows: boolean[][]; mutated: boolean; captureDepth: number };
+ * (true = a hit would sound), whether Mutation or probability changed it from the Base, and the Capture depth. */
+export type LaneView = {
+  cycleIndex: number;
+  step: number;
+  rows: boolean[][];
+  mutated: boolean;
+  captureDepth: number;
+  /** Muted, or another Lane is soloed: the Lane runs but isn't heard. */
+  silent: boolean;
+};
 
 const VIEW_ROW = 16;
 
@@ -188,7 +200,7 @@ export function createEngine() {
   let resetBars = 0;
   let resetTicks = 0; // 0 = Lanes never realign
   let basesChanged = 0; // counts changes to the Captured Bases, so a cached Lane view knows it's out of date
-  const views = new Map<number, { key: string; view: Omit<LaneView, "step"> }>();
+  const views = new Map<number, { key: string; view: Omit<LaneView, "step" | "silent"> }>();
   const voiceDevices = new Map<number, number>(); // Voice device id -> Voice number
 
   /**
@@ -233,7 +245,13 @@ export function createEngine() {
     return sounding;
   }
 
+  /** Muted, or another Lane is soloed. */
+  function silent(lane: number): boolean {
+    return !!lanes[lane].mute || (!lanes[lane].solo && lanes.some((l) => l.solo));
+  }
+
   function renderCycle(lane: number, cycleIndex: number): Event[] {
+    if (silent(lane)) return [];
     const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0 } = lanes[lane];
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
@@ -433,6 +451,8 @@ export function createEngine() {
     resetTicks: () => resetTicks,
     locate,
     renderCycle,
+    /** Whether the Lane is muted, or silenced by another Lane's Solo. */
+    silent,
     /** The Voices a Lane drives (after any pending Voice Layout change). */
     laneVoices,
     /** Voicing Matrix click: put a Voice on a Lane, taking it off any other Lane, or take it off. songTicks: the
@@ -467,7 +487,7 @@ export function createEngine() {
       const step = Math.floor(offsetTicks / stepTicks(lane));
       const key = `${cycleIndex}|${resetTicks}|${basesChanged}|${JSON.stringify(lanes[lane])}`;
       const cached = views.get(lane);
-      if (cached?.key === key) return { ...cached.view, step };
+      if (cached?.key === key) return { ...cached.view, step, silent: silent(lane) };
       const heard = cycleHits(lane, cycleIndex);
       const onsets = new Set(heard.map((h) => Math.round(h.onset / stepTicks(lane))));
       const steps = Array.from({ length: lanes[lane].length }, (_, i) => onsets.has(i));
@@ -480,7 +500,7 @@ export function createEngine() {
         captureDepth: active(lane)?.stack.length ?? 0,
       };
       views.set(lane, { key, view });
-      return { ...view, step };
+      return { ...view, step, silent: silent(lane) };
     },
     /** Make the Cycle's sounding pattern the Lane's new Base (the previous one is kept for Revert). */
     capture(lane: number, cycleIndex: number) {
