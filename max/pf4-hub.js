@@ -105,9 +105,9 @@ function articulate(n, gate, velocity, accent) {
   scheduler.changedNow(n);
 }
 
-// Probability %, Mutation 0–127, Seed: from the next Cycle
-function evolve(n, probability, mutation, seed) {
-  engine.setLane(n, { probability, mutation, seed: seed !== undefined ? Math.round(seed) : undefined });
+// Probability %, Rhythm and Pitch Mutation 0–127, Seed: from the next Cycle
+function evolve(n, probability, mutation, pitchMutation, seed) {
+  engine.setLane(n, { probability, mutation, pitchMutation, seed: seed !== undefined ? Math.round(seed) : undefined });
   refresh(n);
 }
 
@@ -260,7 +260,7 @@ function undo(n) {
 
 function setControls(n, settings) {
   const send = (control, ...values) => outlet(OUT.controls, n, control, ...values);
-  const { length, hits, rotate, rate, pitchCycle, probability, mutation, seed } = settings;
+  const { length, hits, rotate, rate, pitchCycle, probability, mutation, pitchMutation, seed } = settings;
   if (length !== undefined) send("length", length); // before Hits, whose range follows Length
   if (hits !== undefined) send("hits", hits);
   if (rotate !== undefined) send("rotate", rotate);
@@ -271,6 +271,7 @@ function setControls(n, settings) {
   }
   if (probability !== undefined) send("probability", probability);
   if (mutation !== undefined) send("mutation", mutation);
+  if (pitchMutation !== undefined) send("pitchMutation", pitchMutation);
   if (seed !== undefined) send("seed", seed);
 }
 

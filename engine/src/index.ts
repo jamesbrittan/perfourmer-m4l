@@ -56,8 +56,9 @@ export const RATES = Object.keys(RATE_TICKS) as Rate[];
  * degrees and octave octaves. gate runs from short to tied: up to 50% it is that percentage of one step; from 50%
  * to 100% the note stretches from half a step to the whole gap to the next hit, and at 100% it ties into the next.
  * accent: velocity added to the first hit of each Cycle (0 = none).
- * probability: % chance each hit sounds; mutation: 0 (the Base every Cycle) to 127 (a new pattern every Cycle);
- * seed: picks the path Mutation and probability take.
+ * probability: % chance each hit sounds; mutation: how far the hits wander from the Base's, 0 (the Base's every
+ * Cycle) to 127 (a new rhythm every Cycle); pitchMutation: the same for each hit's degree; seed: picks the path
+ * Mutation and probability take.
  * freeze: hold one Cycle, repeating it exactly (its Mutation and probability draws included) whatever Cycle is due;
  * "base" holds the Base without Mutation or probability (a Capture while frozen makes the frozen Cycle the Base). */
 export type LaneParams = {
@@ -70,6 +71,7 @@ export type LaneParams = {
   octave?: number;
   probability?: number;
   mutation?: number;
+  pitchMutation?: number;
   seed?: number;
   groupMode?: GroupMode;
   chordShape?: ChordShape;
@@ -194,8 +196,8 @@ export function createEngine() {
   /**
    * The hits that sound in a Cycle, as onsets and scale degrees (before transpose). Each Cycle starts again from
    * the Base (Euclidean pattern + Pitch Cycle): with probability mutation/127, each step is re-decided (a hit with
-   * the Base's density, hits/length) and each hit's degree is redrawn within the Pitch Cycle's range ±3 degrees;
-   * then each hit sounds with the Lane's probability. The draws come from an RNG seeded by (seed, cycleIndex), a
+   * the Base's density, hits/length), and with probability pitchMutation/127 each hit's degree is redrawn within the
+   * Pitch Cycle's range ±3 degrees; then each hit sounds with the Lane's probability. The draws come from an RNG seeded by (seed, cycleIndex), a
    * fixed number per step, so a Cycle is reproducible from song position whatever the other settings.
    */
   function cycleHits(lane: number, cycleIndex: number, evolve = true): { onset: number; degree: number; count: number }[] {
@@ -203,7 +205,8 @@ export function createEngine() {
     if (freeze === "base") evolve = false;
     const end = playedTicks(lane, cycleIndex);
     if (typeof freeze === "number") cycleIndex = freeze; // a frozen Lane draws, and counts hits, as in its held Cycle
-    const { mutation, probability } = evolve ? { mutation: 0, probability: 100, ...lanes[lane] } : { mutation: 0, probability: 100 };
+    const still = { mutation: 0, pitchMutation: 0, probability: 100 };
+    const { mutation, pitchMutation, probability } = evolve ? { ...still, ...lanes[lane] } : still;
     const stack = active(lane)?.stack;
     const captured = stack?.[stack.length - 1];
     const pattern = bjorklund(hits, length);
@@ -225,7 +228,7 @@ export function createEngine() {
       if (!hit) return;
       const hitCount = count++;
       const baseDegree = captured ? captured.degrees[i] : pitchCycle[hitIndex++ % pitchCycle.length];
-      const degree = pitchDraw < mutation / 127 ? lo + Math.floor(degreeDraw * (hi - lo + 1)) : baseDegree;
+      const degree = pitchDraw < pitchMutation / 127 ? lo + Math.floor(degreeDraw * (hi - lo + 1)) : baseDegree;
       const onset = i * step;
       // a dropped hit still uses up its Pitch Cycle step; hits from a Reset cut on are never reached
       if (soundDraw * 100 < probability && onset < end - 1e-6) sounding.push({ onset, degree, count: hitCount });

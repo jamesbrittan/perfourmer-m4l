@@ -35,12 +35,34 @@ describe("Mutation", () => {
 
   it("keeps mutated pitches in the Scale and near the Lane's register", () => {
     // C major; the Pitch Cycle spans degrees 0–4, so mutated degrees stay within −3…7 (G3 to C5)
-    const pitches = cycles({ mutation: 127, seed: 11 }, 200).flat().map(([, pitch]) => pitch);
+    const pitches = cycles({ pitchMutation: 127, seed: 11 }, 200).flat().map(([, pitch]) => pitch);
     const cMajor = new Set([0, 2, 4, 5, 7, 9, 11]);
     expect(pitches.every((p) => cMajor.has(p % 12))).toBe(true);
     expect(Math.min(...pitches)).toBeGreaterThanOrEqual(55);
     expect(Math.max(...pitches)).toBeLessThanOrEqual(72);
     expect(new Set(pitches).size).toBeGreaterThan(5); // it really does wander
+  });
+});
+
+describe("Rhythm and Pitch Mutation", () => {
+  const onsets = (run: number[][][]) => run.map((cycle) => cycle.map(([onset]) => onset));
+  const pitches = (run: number[][][]) => run.map((cycle) => cycle.map(([, pitch]) => pitch));
+  const base = cycles({});
+
+  it("Mutation alone moves the hits but keeps the Pitch Cycle's degrees", () => {
+    const run = cycles({ mutation: 90, seed: 7 });
+    expect(onsets(run)).not.toEqual(onsets(base));
+    expect(new Set(pitches(run).flat())).toEqual(new Set([60, 64, 67])); // C, E, G: degrees 0, 2, 4
+  });
+
+  it("Pitch Mutation alone keeps the hits where the Base has them and redraws their degrees", () => {
+    const run = cycles({ pitchMutation: 90, seed: 7 });
+    expect(onsets(run)).toEqual(onsets(base));
+    expect(pitches(run)).not.toEqual(pitches(base));
+  });
+
+  it("Pitch Mutation never moves a hit that Mutation placed", () => {
+    expect(onsets(cycles({ mutation: 90, pitchMutation: 127, seed: 7 }))).toEqual(onsets(cycles({ mutation: 90, seed: 7 })));
   });
 });
 

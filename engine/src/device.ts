@@ -31,6 +31,7 @@ export const RANGES = {
   accent: [0, 127],
   probability: [0, 100],
   mutation: [0, 127],
+  pitchMutation: [0, 127],
   seed: [0, 999],
 } as const;
 
@@ -39,7 +40,7 @@ export const LANE_DEFAULTS: LaneParams[] = [
   { hits: 16, length: 16, accent: 15 },
   { hits: 4, length: 16, rotate: 2, gate: 30 },
   { hits: 2, length: 7, rate: "1/4", gate: 100, velocity: 90 },
-  { hits: 5, length: 13, velocity: 85, mutation: 20 },
+  { hits: 5, length: 13, velocity: 85, mutation: 20, pitchMutation: 20 },
 ].map((lane, n) => ({
   rotate: 0,
   rate: "1/16",
@@ -51,6 +52,7 @@ export const LANE_DEFAULTS: LaneParams[] = [
   accent: 0,
   probability: 100,
   mutation: 0,
+  pitchMutation: 0,
   seed: n + 1,
   groupMode: "poly",
   chordShape: "triad",
@@ -103,7 +105,7 @@ const clamp = (value: number, [lo, hi]: readonly [number, number]) => Math.max(l
 /** A Lane's settings brought inside the control ranges (only the settings given). */
 export function inRange(lane: Partial<LaneParams>): Partial<LaneParams> {
   const out: Partial<LaneParams> = { ...lane };
-  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "seed"] as const)
+  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "pitchMutation", "seed"] as const)
     if (typeof out[key] === "number") out[key] = clamp(out[key], RANGES[key]);
   if (out.pitchCycle) {
     const degrees = out.pitchCycle.slice(0, PITCH_STEPS).map((d) => clamp(d, RANGES.degree));
@@ -119,7 +121,7 @@ export const RANDOM_GROUPS: RandomGroup[] = ["rhythm", "pitch", "evolution"];
 /**
  * New values for a Lane's groups, kept musically usable rather than spanning the full ranges: Length 3–16, Hits 1 to
  * Length, Rate 1/8 or 1/16, a Pitch Cycle of 2–6 degrees within ±5 of the Lane's current register,
- * Probability 70–100 and Mutation 0–60 (Mutation then evolves from there). Gate, Velocity and the LFOs aren't touched.
+ * Probability 70–100 and both Mutations 0–60 (the Lane then evolves from there). Gate, Velocity and the LFOs aren't touched.
  * `random` returns [0, 1), like Math.random.
  */
 export function randomSettings(current: LaneParams, groups: RandomGroup[], random: () => number): Partial<LaneParams> {
@@ -143,6 +145,7 @@ export function randomSettings(current: LaneParams, groups: RandomGroup[], rando
   if (groups.includes("evolution")) {
     out.probability = int(70, 100);
     out.mutation = int(0, 60);
+    out.pitchMutation = int(0, 60);
     out.seed = int(0, RANGES.seed[1]);
   }
   return out;

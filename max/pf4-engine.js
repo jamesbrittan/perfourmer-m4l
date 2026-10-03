@@ -46,7 +46,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -140,7 +140,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -233,13 +233,14 @@ var RANGES = {
   accent: [0, 127],
   probability: [0, 100],
   mutation: [0, 127],
+  pitchMutation: [0, 127],
   seed: [0, 999]
 };
 var LANE_DEFAULTS = [
   { hits: 16, length: 16, accent: 15 },
   { hits: 4, length: 16, rotate: 2, gate: 30 },
   { hits: 2, length: 7, rate: "1/4", gate: 100, velocity: 90 },
-  { hits: 5, length: 13, velocity: 85, mutation: 20 }
+  { hits: 5, length: 13, velocity: 85, mutation: 20, pitchMutation: 20 }
 ].map((lane, n) => ({
   rotate: 0,
   rate: "1/16",
@@ -251,6 +252,7 @@ var LANE_DEFAULTS = [
   accent: 0,
   probability: 100,
   mutation: 0,
+  pitchMutation: 0,
   seed: n + 1,
   groupMode: "poly",
   chordShape: "triad",
@@ -307,7 +309,7 @@ var controlName = (kind, lane, voice = 0) => CONTROL_NAMES[kind].replace("{lane}
 var clamp = (value, [lo, hi]) => Math.max(lo, Math.min(hi, value));
 function inRange(lane) {
   const out = { ...lane };
-  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "seed"])
+  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "pitchMutation", "seed"])
     if (typeof out[key] === "number") out[key] = clamp(out[key], RANGES[key]);
   if (out.pitchCycle) {
     const degrees = out.pitchCycle.slice(0, PITCH_STEPS).map((d) => clamp(d, RANGES.degree));
@@ -337,6 +339,7 @@ function randomSettings(current, groups, random) {
   if (groups.includes("evolution")) {
     out.probability = int(70, 100);
     out.mutation = int(0, 60);
+    out.pitchMutation = int(0, 60);
     out.seed = int(0, RANGES.seed[1]);
   }
   return out;
@@ -556,7 +559,8 @@ function createEngine() {
     if (freeze === "base") evolve = false;
     const end = playedTicks(lane, cycleIndex);
     if (typeof freeze === "number") cycleIndex = freeze;
-    const { mutation, probability } = evolve ? { mutation: 0, probability: 100, ...lanes[lane] } : { mutation: 0, probability: 100 };
+    const still = { mutation: 0, pitchMutation: 0, probability: 100 };
+    const { mutation, pitchMutation, probability } = evolve ? { ...still, ...lanes[lane] } : still;
     const stack = active(lane)?.stack;
     const captured = stack?.[stack.length - 1];
     const pattern = bjorklund(hits, length);
@@ -578,7 +582,7 @@ function createEngine() {
       if (!hit) return;
       const hitCount = count++;
       const baseDegree = captured ? captured.degrees[i] : pitchCycle[hitIndex++ % pitchCycle.length];
-      const degree = pitchDraw < mutation / 127 ? lo + Math.floor(degreeDraw * (hi - lo + 1)) : baseDegree;
+      const degree = pitchDraw < pitchMutation / 127 ? lo + Math.floor(degreeDraw * (hi - lo + 1)) : baseDegree;
       const onset = i * step;
       if (soundDraw * 100 < probability && onset < end - 1e-6) sounding.push({ onset, degree, count: hitCount });
     });

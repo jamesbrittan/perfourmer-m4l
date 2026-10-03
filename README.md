@@ -69,7 +69,8 @@ The Hub interface adheres to native Ableton Live 12 device design (169 px tall) 
 
 ### Tab 4: Evolve
 - **Prob %**: Probability that a hit will trigger on any given cycle.
-- **Mutate** (0–127): Depth of algorithmic mutation applied per Cycle to rhythm and pitch.
+- **R-Mut** (0–127): Rhythm Mutation, the chance per Cycle that each step is redrawn from the Base.
+- **P-Mut** (0–127): Pitch Mutation, the chance per Cycle that each hit's scale degree is redrawn (hits stay where they are).
 - **Seed & Randomize (`⚄`)**: Unique deterministic seed governing the mutation path.
 - **Capture**: Freezes the currently sounding mutated cycle as the new Base pattern.
 - **Revert**: Restores the original Base pattern, discarding mutations.
