@@ -108,8 +108,6 @@ export const CHORD_SHAPES = {
   octaves: [0, 7, 14, 21],
 } as const;
 export type ChordShape = keyof typeof CHORD_SHAPES;
-/** Below this, a doubled bass note would be too low to hear: the chord is filled upwards instead. */
-const LOWEST_BASS = 24;
 
 /** resetBars 0 = never; ticksPerBar follows Live's time signature (4/4 = 1920). */
 export type EngineConfig = {
@@ -274,7 +272,8 @@ export function createEngine() {
   /**
    * Voice Layout: which Voices play a hit, and at which pitches. A single Voice plays the hit; a poly group plays
    * the Chord Shape, lowest note on the highest-numbered Voice (the bottom of the Perfourmer's panel), doubling
-   * the bass when the chord is smaller than the group; round-robin takes the group's Voices in turn, counting
+   * its notes at the same pitch, root first, when the chord is smaller than the group (each Voice's octave is the
+   * player's to set, on the synth); round-robin takes the group's Voices in turn, counting
    * hits since the last Reset; unison plays the hit on every Voice.
    */
   function allocate(
@@ -290,17 +289,10 @@ export function createEngine() {
       if (groupMode === "unison") return group.map((voice) => ({ voice, pitch: toPitch(degree) }));
       return [{ voice: group[count % group.length], pitch: toPitch(degree) }];
     }
-    const chord = [...new Set(CHORD_SHAPES[chordShape].map((d) => toPitch(degree + d)))].sort((a, b) => a - b);
-    const root = toPitch(degree);
-    for (let up = 12; chord.length < group.length; up += 12) {
-      const below = chord[0] - 12;
-      const fill = below >= LOWEST_BASS && !chord.includes(below) ? below : root + up; // an octave down, else up
-      if (fill <= 127 && !chord.includes(fill)) chord.push(fill);
-      else if (fill > 127) break;
-      chord.sort((a, b) => a - b);
-    }
+    const shape = [...new Set(CHORD_SHAPES[chordShape].map((d) => toPitch(degree + d)))].sort((a, b) => a - b);
+    const chord = group.map((_, i) => shape[i % shape.length]).sort((a, b) => a - b);
     const highestFirst = [...group].reverse();
-    return chord.slice(0, group.length).map((pitch, i) => ({ voice: highestFirst[i], pitch }));
+    return chord.map((pitch, i) => ({ voice: highestFirst[i], pitch }));
   }
 
   function laneVoices(lane: number): readonly number[] {
