@@ -67,7 +67,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -161,7 +161,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -808,6 +808,21 @@ var RATE_TICKS = {
   "1/32Q": 48
 };
 var RATES = Object.keys(RATE_TICKS);
+var COPIED = [
+  "hits",
+  "length",
+  "rotate",
+  "rate",
+  "pitchCycle",
+  "transpose",
+  "octave",
+  "gate",
+  "velocity",
+  "accent",
+  "probability",
+  "mutation",
+  "seed"
+];
 var SPLITS = {
   "1+1+1+1": [[1], [2], [3], [4]],
   "4": [[1, 2, 3, 4]],
@@ -856,6 +871,10 @@ function degreeToNote(degree, { root, intervals }) {
   const index = degree - octave * intervals.length;
   return MIDDLE_C + root + intervals[index] + 12 * octave;
 }
+var copyBases = ({ signature: signature2, stack }) => ({
+  signature: [...signature2],
+  stack: stack.map(({ steps, degrees }) => ({ steps: [...steps], degrees: [...degrees] }))
+});
 var signature = ({ hits, length, rotate, pitchCycle = [0] }) => [hits, length, rotate, pitchCycle.length, ...pitchCycle];
 function createEngine() {
   let lanes = [];
@@ -1137,6 +1156,24 @@ function createEngine() {
     /** How many Captured Bases the Lane has (Revert steps back through them); 0 = its Euclidean pattern. */
     captureDepth(lane) {
       return active(lane)?.stack.length ?? 0;
+    },
+    /** A snapshot of the Lane's settings and Captured Bases, for pasteBases and the Lane's controls. */
+    copyLane(lane) {
+      const source = lanes[lane];
+      const settings = Object.fromEntries(
+        COPIED.filter((key) => source[key] !== void 0).map((key) => [key, source[key]])
+      );
+      if (source.pitchCycle) settings.pitchCycle = [...source.pitchCycle];
+      const entry = active(lane);
+      return { settings, bases: entry ? copyBases(entry) : null };
+    },
+    /** Give the Lane a copy's Captured Bases (or none): they wait, as when a set loads, until the Lane's controls
+     * have taken the copy's settings. */
+    pasteBases(lane, { bases }) {
+      captures.delete(lane);
+      if (bases) captures.set(lane, { ...copyBases(bases), waiting: true });
+      basesChanged++;
+      settingsChanged();
     },
     /** Every Lane's Captured Bases as plain numbers, for storing with the set. */
     saveBases() {

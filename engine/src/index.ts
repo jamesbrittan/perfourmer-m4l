@@ -79,6 +79,16 @@ export type LaneParams = {
   accent?: number;
   freeze?: number | "base";
 };
+/** The settings a Lane copy carries: everything musical, but not the Lane's voicing (its Voices, Group Mode and
+ * Chord Shape belong to the synth's routing) or its Freeze. */
+const COPIED = ["hits", "length", "rotate", "rate", "pitchCycle", "transpose", "octave", "gate", "velocity", "accent",
+  "probability", "mutation", "seed"] as const satisfies readonly (keyof LaneParams)[];
+/** A snapshot of a Lane, to paste into another: its settings and its Captured Bases (oldest first), if any, with the
+ * controls they were captured under. */
+export type LaneCopy = {
+  settings: Partial<LaneParams>;
+  bases: { signature: number[]; stack: Captured[] } | null;
+};
 /** Live's global scale: root 0–11 (C = 0) and the semitone intervals of its notes. */
 export type Scale = { root: number; intervals: number[] };
 /** Standard groupings of the four Voices, as Voicing Matrix presets: Lanes take the groups in order. */
@@ -169,6 +179,10 @@ function degreeToNote(degree: number, { root, intervals }: Scale): number {
 /** A Captured Base: which steps hit, and a scale degree for every step (a rest step keeps the previous hit's). */
 type Captured = { steps: boolean[]; degrees: number[] };
 /** The controls a Captured Base was taken under; changing any of them hands the Lane back to its controls. */
+const copyBases = ({ signature, stack }: { signature: number[]; stack: Captured[] }) => ({
+  signature: [...signature],
+  stack: stack.map(({ steps, degrees }) => ({ steps: [...steps], degrees: [...degrees] })),
+});
 const signature = ({ hits, length, rotate, pitchCycle = [0] }: LaneParams) => [hits, length, rotate, pitchCycle.length, ...pitchCycle];
 
 export function createEngine() {
@@ -510,6 +524,24 @@ export function createEngine() {
     /** How many Captured Bases the Lane has (Revert steps back through them); 0 = its Euclidean pattern. */
     captureDepth(lane: number) {
       return active(lane)?.stack.length ?? 0;
+    },
+    /** A snapshot of the Lane's settings and Captured Bases, for pasteBases and the Lane's controls. */
+    copyLane(lane: number): LaneCopy {
+      const source = lanes[lane];
+      const settings: LaneCopy["settings"] = Object.fromEntries(
+        COPIED.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]),
+      );
+      if (source.pitchCycle) settings.pitchCycle = [...source.pitchCycle];
+      const entry = active(lane);
+      return { settings, bases: entry ? copyBases(entry) : null };
+    },
+    /** Give the Lane a copy's Captured Bases (or none): they wait, as when a set loads, until the Lane's controls
+     * have taken the copy's settings. */
+    pasteBases(lane: number, { bases }: LaneCopy) {
+      captures.delete(lane);
+      if (bases) captures.set(lane, { ...copyBases(bases), waiting: true });
+      basesChanged++;
+      settingsChanged(); // the controls may already match
     },
     /** Every Lane's Captured Bases as plain numbers, for storing with the set. */
     saveBases(): number[] {

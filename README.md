@@ -48,6 +48,7 @@ The Hub interface adheres to native Ableton Live 12 device design (169 px tall) 
 ### Permanent Strip (Always Visible)
 - **Reset Bars**: Periodically realigns all running Lanes to step 1 every *N* bars (1–64, or 0 to let patterns drift freely).
 - **Pattern View**: Live 4-lane sequence display showing hits (`●`), rests (`·`), and current step playheads (`◉` / `○`). Monospace layout with 16-step musical wrapping.
+- **Lane menu** (click `L1`–`L4`): **Copy** a Lane, **Paste** the copy into another, or **Swap** two Lanes. A paste brings the rhythm, Pitch Cycle, Feel and Evolve settings and any Captured Base; the Lane keeps its Voices, Group Mode and Chord Shape. **Undo** puts the Lane back.
 
 ### Tab 1: Rhythm
 - **Hits** (0–32): Number of active hits distributed evenly across the Cycle using Euclidean spacing.
