@@ -280,6 +280,7 @@ DEFAULTS = SHARED["LANE_DEFAULTS"]  # each Lane's settings in a new Hub
 OUT = SHARED["OUT"]  # the Hub script's outlets
 RATES = SHARED["RATES"]
 LFO_DEFAULTS = [(7, 5), (11, 9), (13, 15), (17, 19)]  # per Lane: (AT rate, CC1 rate) in bars; depths default to 0 (off)
+VIEW_TICKS = 20  # pattern view playhead: redrawn on this tick grid while playing (about 21 ms at 120 BPM)
 LFO_UPDATE_MS = 40  # LFO sampling; only changed values are sent, so the MIDI port isn't flooded
 
 
@@ -419,6 +420,12 @@ def build_hub():
     where = P.obj("prepend where", 1300, Y + 60)
     readouts = P.obj("route " + " ".join(str(n) for n in range(2 * LANES)), 1300, Y + 90, ins=2, outs=2 * LANES + 1)  # 0–3 positions, 4–7 Bases
     P.c(poll, poll_pos); P.c(poll_pos, where, 7); P.c(where, adapter); P.c(adapter, readouts, OUT["readouts"])
+    # while playing, the pattern views also follow a transport-synced clock, so the playhead moves on step by step
+    # instead of on the poll's 100 ms beat (a 125 ms step would show for 100 then 200 ms)
+    view_clock = P.obj(f"metro {VIEW_TICKS} ticks @quantize {VIEW_TICKS} ticks @active 1", 1450, Y, ins=2)
+    view_pos = P.obj("transport", 1450, Y + 30, ins=2, outs=9)
+    show = P.obj("prepend show", 1450, Y + 60)
+    P.c(view_clock, view_pos); P.c(view_pos, show, 7); P.c(show, adapter)
     P.c(load, adapter)                               # render every Lane once
 
     # --- E16 Hardware Integration (ControlSurface live.object + live.path)

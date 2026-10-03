@@ -541,22 +541,39 @@ function bang() {
   updateMatrixActiveStates();
 }
 
-// song position (polled a few times a second): show where each Lane is, from the engine's own locate()
+// song position (polled a few times a second): follow it, and show where each Lane is
 function where(songTicks) {
   if (scheduler.playing) engine.retireVoiceLayout(songTicks);
   scheduler.poll(songTicks);
+  show(songTicks);
+}
+
+// what each Lane's readouts and pattern view last showed, so they're only sent again when they change
+const shown = [];
+
+// show where each Lane is, from the engine's own locate(): from the poll, and from a transport-synced clock while
+// playing, so the playhead moves on in time with the steps
+function show(songTicks) {
   for (let n = 0; n < LANES; n++) {
     const { cycleIndex, step, rows, mutated, captureDepth } = engine.laneView(n, songTicks);
     const { length } = engine.laneSettings(n);
-    outlet(OUT.readouts, n, "set", `Cycle ${cycleIndex + 1} · step ${step + 1}/${length}${mutated ? " · mutated" : ""}`);
-    outlet(OUT.readouts, LANES + n, "set", captureDepth ? `captured${captureDepth > 1 ? ` ×${captureDepth}` : ""}` : "Euclidean");
     // pattern view: ● hit, · rest; the playhead step (◉ hit, ○ rest) goes on an overlay in its own colour, and the
     // pattern leaves a gap under it. No-break spaces pad both, so Max keeps leading blanks and the columns line up
     const gap = "\u00a0";
     const draw = (glyph) =>
       rows.map((row, r) => row.map((hit, i) => glyph(hit, r * rows[0].length + i === step)).join(gap)).join("\n");
-    outlet(OUT.patterns, n, "set", draw((hit, playhead) => (playhead ? gap : hit ? "●" : "·")));
-    outlet(OUT.patterns, LANES + n, "set", draw((hit, playhead) => (playhead ? (hit ? "◉" : "○") : gap)));
+    const texts = [
+      `Cycle ${cycleIndex + 1} · step ${step + 1}/${length}${mutated ? " · mutated" : ""}`,
+      captureDepth ? `captured${captureDepth > 1 ? ` ×${captureDepth}` : ""}` : "Euclidean",
+      draw((hit, playhead) => (playhead ? gap : hit ? "●" : "·")),
+      draw((hit, playhead) => (playhead ? (hit ? "◉" : "○") : gap)),
+    ];
+    const last = shown[n] ?? [];
+    shown[n] = texts;
+    if (texts[0] !== last[0]) outlet(OUT.readouts, n, "set", texts[0]);
+    if (texts[1] !== last[1]) outlet(OUT.readouts, LANES + n, "set", texts[1]);
+    if (texts[2] !== last[2]) outlet(OUT.patterns, n, "set", texts[2]);
+    if (texts[3] !== last[3]) outlet(OUT.patterns, LANES + n, "set", texts[3]);
   }
 }
 
