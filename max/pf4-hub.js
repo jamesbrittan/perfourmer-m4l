@@ -249,7 +249,8 @@ function frozen(...data) {
 // Randomise: new values for one of a Lane's groups ("rhythm", "pitch" or "evolution"), or all three ("lane"); Lane -1
 // = every Lane. The values are set on the controls themselves, so they're saved with the set, show in automation and
 // reach the engine as a turn of the knobs would. Undo puts back the controls from before the Lane's last roll.
-const beforeRoll = Array.from({ length: LANES }, () => null);
+// Undo also puts back a Lane from before a paste or swap, Captured Bases included.
+const beforeRoll = Array.from({ length: LANES }, () => null); // { settings, bases? } (bases: only after a paste)
 function randomise(n, group) {
   if (n < 0) {
     for (let m = 0; m < LANES; m++) randomise(m, "lane");
@@ -257,19 +258,49 @@ function randomise(n, group) {
   }
   const current = engine.laneSettings(n);
   const next = randomSettings(current, group === "lane" ? RANDOM_GROUPS : [group], Math.random);
-  beforeRoll[n] = Object.fromEntries(Object.keys(next).map((key) => [key, current[key]]));
+  beforeRoll[n] = { settings: Object.fromEntries(Object.keys(next).map((key) => [key, current[key]])) };
   setControls(n, next);
 }
 
 function undo(n) {
   const back = beforeRoll[n];
   beforeRoll[n] = null;
-  if (back) setControls(n, back);
+  if (back && back.bases !== undefined) return paste(n, back);
+  if (back) setControls(n, back.settings);
+}
+
+// Lane menu: Copy a Lane, Paste the copy into a Lane, or Swap two Lanes. A paste sets the Lane's controls (as
+// Randomise does) and brings the copy's Captured Bases; the Lane keeps its Voices, Group Mode and Chord Shape.
+let copied = null;
+function copyLane(n) {
+  copied = engine.copyLane(n);
+}
+
+function pasteLane(n) {
+  if (!copied) return;
+  beforeRoll[n] = engine.copyLane(n);
+  paste(n, copied);
+}
+
+function swapLanes(a, b) {
+  const [first, second] = [engine.copyLane(a), engine.copyLane(b)];
+  beforeRoll[a] = first;
+  beforeRoll[b] = second;
+  paste(a, second);
+  paste(b, first);
+}
+
+function paste(n, copy) {
+  engine.pasteBases(n, copy);
+  storeBases();
+  refresh(n); // the Lane's Base may have changed even if no control does
+  setControls(n, copy.settings);
 }
 
 function setControls(n, settings) {
   const send = (control, ...values) => outlet(OUT.controls, n, control, ...values);
-  const { length, hits, rotate, rate, pitchCycle, probability, mutation, seed } = settings;
+  const { length, hits, rotate, rate, pitchCycle, transpose, octave, gate, velocity, accent, probability, mutation, seed } =
+    settings;
   if (length !== undefined) send("length", length); // before Hits, whose range follows Length
   if (hits !== undefined) send("hits", hits);
   if (rotate !== undefined) send("rotate", rotate);
@@ -278,6 +309,11 @@ function setControls(n, settings) {
     pitchCycle.slice(0, PITCH_STEPS).forEach((degree, i) => send("degree", i, degree));
     send("pitchLength", Math.min(pitchCycle.length, PITCH_STEPS));
   }
+  if (transpose !== undefined) send("transpose", transpose);
+  if (octave !== undefined) send("octave", octave);
+  if (gate !== undefined) send("gate", gate);
+  if (velocity !== undefined) send("velocity", velocity);
+  if (accent !== undefined) send("accent", accent);
   if (probability !== undefined) send("probability", probability);
   if (mutation !== undefined) send("mutation", mutation);
   if (seed !== undefined) send("seed", seed);

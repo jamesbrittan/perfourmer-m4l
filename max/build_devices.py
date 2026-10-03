@@ -117,7 +117,12 @@ HELP = {
                                        "Takes effect from each Lane's next Cycle."),
     "Randomise": ("Randomise Lane", "Rolls new random values for this Lane across Rhythm, Pitch, and Evolution. "
                                     "Takes effect from the next Cycle."),
-    "Undo Randomise": ("Undo Randomise", "Restores this Lane's controls to the values from before the last roll."),
+    "Undo Randomise": ("Undo", "Restores this Lane's controls to the values from before the last roll, paste or "
+                               "swap."),
+    "readout:laneMenu": ("Lane menu", "Click the Lane's name to copy the Lane, paste a copied Lane into it, or swap it "
+                                      "with another Lane. A paste brings the rhythm, Pitch Cycle, Feel and Evolve "
+                                      "settings and any Captured Base, from the next Cycle. The Lane keeps its Voices, "
+                                      "Group Mode and Chord Shape. Undo puts the Lane back."),
     "Randomise Rhythm": ("Randomise Rhythm", "Rolls new Hits, Length, and Rotate values for this Lane. "
                                              "Takes effect from the next Cycle."),
     "Randomise Pitch": ("Randomise Pitch", "Rolls a new melodic Pitch Cycle and Transpose for this Lane. "
@@ -137,6 +142,8 @@ def info_for(box):
             return HELP["Voicing Matrix"]
         kind = re.sub(r"^L\d+ ", "", name)
         return HELP.get(kind) or HELP.get(re.sub(r" \d+$", "", kind))
+    if box["maxclass"] == "umenu":
+        return HELP["readout:laneMenu"]
     text = box.get("text", "")
     if box["maxclass"] not in ("comment", "message"):
         return None
@@ -510,7 +517,20 @@ def build_hub():
 
         # Permanent Left: Lane label & broad 252px Pattern glyphs (16 steps/line). Menlo on purpose: the steps must line
         # up in columns across Lanes, and Ableton Sans gives ● and · different widths; all other text is Ableton Sans
-        P.comment(f"L{n + 1}", 6, ry + 3, 18)
+        # the Lane's name is its menu: Copy, Paste, Swap with each other Lane (each choice shows the name again)
+        others = [m for m in range(LANES) if m != n]
+        actions = [f"copyLane {n}", f"pasteLane {n}"] + [f"swapLanes {n} {m}" for m in others]
+        labels = [f"L{n + 1}", f"Copy L{n + 1}", f"Paste into L{n + 1}"] + [f"Swap with L{m + 1}" for m in others]
+        lane_menu = P.add("umenu", 4, ry + 2, w=22, h=18, ins=1, outs=3, arrow=0,
+                          items=[part for label in labels for part in (label, ",")][:-1])
+        chosen = P.obj("t b i", lx + 400, Y + 1130, ins=1, outs=2)
+        pick = P.obj("sel " + " ".join(str(i + 1) for i in range(len(actions))), lx + 400, Y + 1160,
+                     ins=2, outs=len(actions) + 1)
+        show_name = P.msg("set 0", lx + 460, Y + 1130)
+        P.c(lane_menu, chosen); P.c(chosen, pick, 1); P.c(chosen, show_name, 0); P.c(show_name, lane_menu)
+        for i, text in enumerate(actions):
+            action = P.msg(text, lx + 400 + 70 * (i % 3), Y + 1190 + 25 * (i // 3))
+            P.c(pick, action, i); P.c(action, adapter)
         initial_dots = " ".join(["·"] * min(16, len_d))
         view = P.add("comment", 28, ry, w=212, h=20, text=initial_dots,
                      fontname="Menlo", fontsize=9.0, ins=1, outs=0)
@@ -689,10 +709,11 @@ def build_hub():
         P.c(lane, prep); P.c(prep, adapter)
 
         # Randomise / Undo: "<control> <value>" for this Lane, to the controls themselves
-        names = ["length", "hits", "rotate", "rate", "degree", "pitchLength", "probability", "mutation", "seed"]
+        names = ["length", "hits", "rotate", "rate", "degree", "pitchLength", "transpose", "octave", "gate", "velocity",
+                 "accent", "probability", "mutation", "seed"]
         to_control = P.obj("route " + " ".join(names), lx, Y + 1130, ins=2, outs=len(names) + 1)
         P.c(control_lanes, to_control, n)
-        for i, box in enumerate((length, hits, rotate, rate, None, plen, prob, mut, seed)):
+        for i, box in enumerate((length, hits, rotate, rate, None, plen, trans, octv, gate, vel, acc, prob, mut, seed)):
             if box:
                 P.c(to_control, box, i)
         to_degree = P.obj("route " + " ".join(str(i) for i in range(PITCH_STEPS)), lx, Y + 1160, ins=2,
