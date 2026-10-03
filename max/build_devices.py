@@ -60,7 +60,7 @@ HELP = {
     "Octave": ("Octave", "Moves the Lane up or down by octaves. Takes effect from the next Cycle."),
     "Gate": ("Gate %", "Note length, from short to tied. Up to 50%: that percentage of one step. From 50% to 100%: "
              "stretches from half a step to the whole gap to the next hit, so sparse patterns get long notes. 100%: "
-             "each note ties into the next (legato; glides if the Perfourmer's Glide is up). Heard from the next note."),
+             "each note lasts until just before the next. Heard from the next note."),
     "Velocity": ("Velocity", "Velocity of every note (1–127). Heard from the next note."),
     "Accent": ("Accent", "Velocity added to the first hit of each Cycle; 0 = no accent. Heard from the next note."),
     "Probability": ("Probability", "Chance (%) that each hit sounds, decided per Cycle from the Seed, so the same bars "

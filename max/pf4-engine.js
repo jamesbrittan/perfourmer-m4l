@@ -834,7 +834,6 @@ var VIEW_ROW = 16;
 var MIDDLE_C = 60;
 var CHANGE_LEAD = 240;
 var RETRIGGER_TICKS = 6;
-var LEGATO_TICKS = 6;
 var C_MAJOR = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
 function bjorklund(hits, length) {
   hits = Math.max(0, Math.min(hits, length));
@@ -1001,17 +1000,18 @@ function createEngine() {
     const lastSlot = aligned ? end / gridTicks - 1 : Math.ceil(end / gridTicks) - 2;
     const at = (e, offset = 0) => (Math.min(slotOf(e.onset), lastSlot) + offset) * gridTicks;
     const events = renderCycle(lane, cycleIndex);
+    const afterNext = end + playedTicks(lane, cycleIndex + 1);
     const following = [
       ...events.map((e) => ({ ...e, start: at(e) })),
-      ...renderCycle(lane, cycleIndex + 1).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + end }))
+      ...renderCycle(lane, cycleIndex + 1).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + end })),
+      ...renderCycle(lane, cycleIndex + 2).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + afterNext }))
     ];
     const slots = /* @__PURE__ */ new Map();
     for (const e of events) {
       const start = at(e);
       let length = e.onset + e.duration - start;
       const next = following.find((n) => n.voice === e.voice && n.start > start);
-      if (next && next.pitch === e.pitch) length = Math.min(length, next.start - start - RETRIGGER_TICKS);
-      else if (next && start + length >= next.start) length = next.start - start + LEGATO_TICKS;
+      if (next) length = Math.min(length, next.start - start - RETRIGGER_TICKS);
       const slot = start / gridTicks;
       slots.set(slot, [...slots.get(slot) ?? [], [e.voice, e.pitch, e.velocity, Math.max(gridTicks, length)]]);
     }

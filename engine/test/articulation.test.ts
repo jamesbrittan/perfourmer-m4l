@@ -60,21 +60,36 @@ describe("Player table", () => {
     ]);
   });
 
-  it("runs a note just past the start of a different pitch, so the two join legato", () => {
+  it("ends a note just before the next one starts, so notes never overlap and the synth retriggers", () => {
     // x..x..x. : 360-tick gaps, then 240 to the next Cycle's first hit
-    const lengths = table({ pitchCycle: [0, 2, 4] }).map((s) => s.notes[0][3]);
-    expect(lengths).toEqual([366, 366, 246]);
-  });
-
-  it("ends a note just before the same pitch starts again, so the synth retriggers", () => {
     expect(table({ pitchCycle: [0] }).map((s) => s.notes[0][3])).toEqual([354, 354, 234]);
+    expect(table({ pitchCycle: [0, 2, 4] }).map((s) => s.notes[0][3])).toEqual([354, 354, 234]);
   });
 
   it("looks into the next Cycle for the note after a Cycle's last one", () => {
-    // pitches 60 64 67 | 69 …: the last note runs into a different pitch, legato
-    expect(table({ pitchCycle: [0, 2, 4, 5] }).map((s) => s.notes[0][3])).toEqual([366, 366, 246]);
-    // x.x. with pitches 60 64 | 64 …: the last note is followed by the same pitch, so it retriggers
-    expect(table({ pitchCycle: [0, 2, 2], hits: 2, length: 4 }).map((s) => s.notes[0][3])).toEqual([246, 234]);
+    // x.x. : the last note ends just before the next Cycle's first hit
+    expect(table({ pitchCycle: [0, 2, 2], hits: 2, length: 4 }).map((s) => s.notes[0][3])).toEqual([234, 234]);
+  });
+
+  it("ends a long note before the next one after a Cycle with no hits", () => {
+    // one hit per 2-step Cycle at 50% probability: the note before a silent Cycle lasts across it to the next hit
+    const engine = createEngine();
+    engine.configure({ lanes: [{ hits: 1, length: 2, rotate: 0, gate: 100, probability: 50, seed: 3 }] });
+    const notes = Array.from({ length: 40 }, (_, c) =>
+      engine.slotTable(0, 2, c).flatMap(({ slot, notes }) => notes.map(([, , , length]) => [c * 240 + slot * 2, length])),
+    ).flat();
+    const silentCycles = 40 - notes.length;
+    expect(silentCycles).toBeGreaterThan(5);
+    notes.slice(1).forEach(([start], i) => expect(notes[i][0] + notes[i][1]).toBeLessThanOrEqual(start - 6));
+  });
+
+  it("never overlaps notes at Gate 100, so a synth in legato mode doesn't hang (Detroit with Triad Arch)", () => {
+    const engine = createEngine();
+    engine.configure({ lanes: [{ hits: 2, length: 5, rotate: 0, gate: 100, pitchCycle: [0, 2, 4, 2] }] });
+    const notes = Array.from({ length: 40 }, (_, c) =>
+      engine.slotTable(0, 2, c).flatMap(({ slot, notes }) => notes.map(([, , , length]) => [c * 600 + slot * 2, length])),
+    ).flat();
+    notes.slice(1).forEach(([start], i) => expect(notes[i][0] + notes[i][1]).toBeLessThanOrEqual(start - 6));
   });
 
   it("leaves a note that ends well before the next one as the gate makes it", () => {

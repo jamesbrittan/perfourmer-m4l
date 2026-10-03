@@ -55,7 +55,7 @@ export type Rate = keyof typeof RATE_TICKS;
 export const RATES = Object.keys(RATE_TICKS) as Rate[];
 /** pitchCycle: scale degrees, one per hit (0 = the Scale's root nearest middle C), shifted by transpose
  * degrees and octave octaves. gate runs from short to tied: up to 50% it is that percentage of one step; from 50%
- * to 100% the note stretches from half a step to the whole gap to the next hit, and at 100% it ties into the next.
+ * to 100% the note stretches from half a step to the whole gap to the next hit, ending just before the next note.
  * accent: velocity added to the first hit of each Cycle (0 = none).
  * probability: % chance each hit sounds; mutation: 0 (the Base every Cycle) to 127 (a new pattern every Cycle);
  * seed: picks the path Mutation and probability take.
@@ -133,10 +133,9 @@ const MIDDLE_C = 60;
 /** A Voice Layout change made while playing waits for a bar at least this far ahead (an eighth note), so the
  * Cycles rendered for it reach the player in time. */
 const CHANGE_LEAD = 240;
-/** A note followed by the same pitch on its Voice ends at least this many ticks before it (so the synth sees the
- * gate close and retriggers); one running into a different pitch lasts this much longer (so the two join legato). */
+/** A note ends at least this many ticks before the next note on its Voice, so the synth sees the gate close and
+ * retriggers. Notes never overlap: a mono synth in legato mode can hang on overlapping notes. */
 const RETRIGGER_TICKS = 6;
-const LEGATO_TICKS = 6;
 const C_MAJOR: Scale = { root: 0, intervals: [0, 2, 4, 5, 7, 9, 11] };
 
 /** Bjorklund's algorithm: the Euclidean rhythms as tabulated by Toussaint (first hit on step 0). */
@@ -356,9 +355,9 @@ export function createEngine() {
   /**
    * A Cycle as the fine-grid player reads it: the notes starting in each grid slot, in slot order, each with the
    * length it should last from that slot. The player reads slot floor(position / grid) on ticks one grid step
-   * apart, so a note sounds up to a slot early; lengths are measured from there. A note followed by the same pitch
-   * on its Voice (in this Cycle or the next) ends RETRIGGER_TICKS before it; one that reaches a different pitch
-   * lasts LEGATO_TICKS past its start. No note is shorter than a slot.
+   * apart, so a note sounds up to a slot early; lengths are measured from there. A note ends at least
+   * RETRIGGER_TICKS before the next note on its Voice (in this Cycle or the next two), so notes never overlap. No note
+   * is shorter than a slot.
    */
   function slotTable(lane: number, gridTicks: number, cycleIndex = 0): Slot[] {
     const slotOf = (tick: number) => Math.floor(tick / gridTicks + 1e-9);
@@ -369,17 +368,19 @@ export function createEngine() {
     const lastSlot = aligned ? end / gridTicks - 1 : Math.ceil(end / gridTicks) - 2;
     const at = (e: Event, offset = 0) => (Math.min(slotOf(e.onset), lastSlot) + offset) * gridTicks;
     const events = renderCycle(lane, cycleIndex);
+    // a Cycle's last note can last across a following Cycle with no hits, up to the start of the one after
+    const afterNext = end + playedTicks(lane, cycleIndex + 1);
     const following = [
       ...events.map((e) => ({ ...e, start: at(e) })),
       ...renderCycle(lane, cycleIndex + 1).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + end })),
+      ...renderCycle(lane, cycleIndex + 2).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + afterNext })),
     ];
     const slots = new Map<number, Slot["notes"]>();
     for (const e of events) {
       const start = at(e);
       let length = e.onset + e.duration - start;
       const next = following.find((n) => n.voice === e.voice && n.start > start);
-      if (next && next.pitch === e.pitch) length = Math.min(length, next.start - start - RETRIGGER_TICKS);
-      else if (next && start + length >= next.start) length = next.start - start + LEGATO_TICKS;
+      if (next) length = Math.min(length, next.start - start - RETRIGGER_TICKS);
       const slot = start / gridTicks;
       slots.set(slot, [...(slots.get(slot) ?? []), [e.voice, e.pitch, e.velocity, Math.max(gridTicks, length)]]);
     }
