@@ -57,6 +57,7 @@ export const RATES = Object.keys(RATE_TICKS) as Rate[];
  * degrees and octave octaves. gate runs from short to tied: up to 50% it is that percentage of one step; from 50%
  * to 100% the note stretches from half a step to the whole gap to the next hit, and at 100% it ties into the next.
  * accent: velocity added to the first hit of each Cycle (0 = none).
+ * ratchet: pulses (2–4) a ratcheted hit plays across its step; ratchetProbability: % chance each hit ratchets.
  * probability: % chance each hit sounds; mutation: 0 (the Base every Cycle) to 127 (a new pattern every Cycle);
  * seed: picks the path Mutation and probability take.
  * freeze: hold one Cycle, repeating it exactly (its Mutation and probability draws included) whatever Cycle is due;
@@ -77,6 +78,8 @@ export type LaneParams = {
   gate?: number;
   velocity?: number;
   accent?: number;
+  ratchet?: number;
+  ratchetProbability?: number;
   freeze?: number | "base";
 };
 /** Live's global scale: root 0–11 (C = 0) and the semitone intervals of its notes. */
@@ -157,6 +160,9 @@ function bjorklund(hits: number, length: number): boolean[] {
 /** One RNG seed per (Lane seed, Cycle). */
 const mix = (seed: number, cycleIndex: number) => (Math.imul(seed + 1, 0x9e3779b1) ^ Math.imul(cycleIndex + 1, 0x85ebca6b)) | 0;
 
+/** Sets the ratchet draws' RNG apart from Mutation's. */
+const RATCHET_STREAM = 0x52415443;
+
 const clampToMidi = (note: number) => Math.max(0, Math.min(127, note));
 
 /** A scale degree as a MIDI note: degrees past the Scale's last note carry on into the next octave. */
@@ -235,33 +241,54 @@ export function createEngine() {
   }
 
   function renderCycle(lane: number, cycleIndex: number): Event[] {
-    const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0 } = lanes[lane];
+    const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0, ratchet = 2, ratchetProbability = 0 } =
+      lanes[lane];
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
     const sounding = cycleHits(lane, cycleIndex);
     // the gap after the last hit runs to the next Cycle's first hit
     const next = cycleHits(lane, cycleIndex + 1)[0]?.onset ?? playedTicks(lane, cycleIndex + 1);
     const gaps = sounding.map(({ onset }, i) => (i + 1 < sounding.length ? sounding[i + 1].onset : end + next) - onset);
-    const noteLength = (gap: number) =>
-      gate <= 50 ? (step * gate) / 100 : step / 2 + ((gap - step / 2) * (gate - 50)) / 50; // short … half a step … tied
+    // short … half a pulse … tied (a pulse is a step, or a share of one in a ratchet)
+    const noteLength = (gap: number, pulse = step) =>
+      gate <= 50 ? (pulse * gate) / 100 : pulse / 2 + ((gap - pulse / 2) * (gate - 50)) / 50;
+    const bursts = ratchetDraws(lane, cycleIndex);
     const toPitch = (degree: number) => clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave);
     const start = cycleStart(lane, cycleIndex);
     return sounding.flatMap(({ onset, degree, count }, hit) => {
-      const before = start + onset < layoutChange.at; // started under the previous Voice Layout
-      let duration = noteLength(gaps[hit]);
-      const cut = before && start + onset + duration > layoutChange.at; // still sounding when the layout changes
-      if (cut) duration = layoutChange.at - start - onset;
-      const note = {
-        onset,
-        duration,
-        velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0))),
-      };
-      return allocate(lane, degree, count, toPitch, before ? layoutChange.from : voiceLayout).map(({ voice, pitch }) => ({
-        ...note,
-        pitch,
-        voice,
-      }));
+      // a ratcheted hit plays `ratchet` pulses evenly across its step; the last one takes the rest of the gap
+      const pulses = bursts[Math.round(onset / step)] < ratchetProbability ? ratchet : 1;
+      const pulse = step / pulses;
+      return Array.from({ length: pulses }, (_, k) => k).flatMap((k) => {
+        const at = onset + k * pulse;
+        if (at >= end - 1e-6) return []; // cut off by a Reset
+        const last = k === pulses - 1;
+        const before = start + at < layoutChange.at; // started under the previous Voice Layout
+        let duration = pulses === 1 ? noteLength(gaps[hit]) : noteLength(last ? gaps[hit] - k * pulse : pulse, pulse);
+        const cut = before && start + at + duration > layoutChange.at; // still sounding when the layout changes
+        if (cut) duration = layoutChange.at - start - at;
+        const note = {
+          onset: at,
+          duration,
+          velocity: Math.max(1, Math.min(127, velocity + (hit === 0 && k === 0 ? accent : 0))),
+        };
+        return allocate(lane, degree, count, toPitch, before ? layoutChange.from : voiceLayout).map(({ voice, pitch }) => ({
+          ...note,
+          pitch,
+          voice,
+        }));
+      });
     });
+  }
+
+  /** One draw (0–100) per step: a hit ratchets when its step's draw is under Ratchet probability. The draws have
+   * their own RNG, seeded by (seed, Cycle), so they never change the hits Mutation and probability give; a frozen
+   * Lane uses its held Cycle's (a Lane holding its Base, Cycle 0's). */
+  function ratchetDraws(lane: number, cycleIndex: number): number[] {
+    const { length, seed = 0, freeze } = lanes[lane];
+    const held = typeof freeze === "number" ? freeze : freeze === "base" ? 0 : cycleIndex;
+    const rng = xoroshiro128plus(mix(seed, held) ^ RATCHET_STREAM);
+    return Array.from({ length }, () => uniformInt(rng, 0, 99999) / 1000);
   }
 
   /** The song tick a Cycle starts at (the inverse of locate). */

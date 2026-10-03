@@ -67,7 +67,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -161,7 +161,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -252,6 +252,8 @@ var RANGES = {
   gate: [1, 100],
   velocity: [1, 127],
   accent: [0, 127],
+  ratchet: [2, 4],
+  ratchetProbability: [0, 100],
   probability: [0, 100],
   mutation: [0, 127],
   seed: [0, 999]
@@ -270,6 +272,8 @@ var LANE_DEFAULTS = [
   gate: 50,
   velocity: 100,
   accent: 0,
+  ratchet: 2,
+  ratchetProbability: 0,
   probability: 100,
   mutation: 0,
   seed: n + 1,
@@ -330,7 +334,7 @@ var controlName = (kind, lane, voice = 0) => CONTROL_NAMES[kind].replace("{lane}
 var clamp = (value, [lo, hi]) => Math.max(lo, Math.min(hi, value));
 function inRange(lane) {
   const out = { ...lane };
-  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "seed"])
+  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "ratchet", "ratchetProbability", "probability", "mutation", "seed"])
     if (typeof out[key] === "number") out[key] = clamp(out[key], RANGES[key]);
   if (out.pitchCycle) {
     const degrees = out.pitchCycle.slice(0, PITCH_STEPS).map((d) => clamp(d, RANGES.degree));
@@ -850,6 +854,7 @@ function bjorklund(hits, length) {
   return groups.concat(remainder).flat();
 }
 var mix = (seed, cycleIndex) => Math.imul(seed + 1, 2654435761) ^ Math.imul(cycleIndex + 1, 2246822507) | 0;
+var RATCHET_STREAM = 1380013123;
 var clampToMidi = (note) => Math.max(0, Math.min(127, note));
 function degreeToNote(degree, { root, intervals }) {
   const octave = Math.floor(degree / intervals.length);
@@ -907,31 +912,45 @@ function createEngine() {
     return sounding;
   }
   function renderCycle(lane, cycleIndex) {
-    const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0 } = lanes[lane];
+    const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0, ratchet = 2, ratchetProbability = 0 } = lanes[lane];
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
     const sounding = cycleHits(lane, cycleIndex);
     const next = cycleHits(lane, cycleIndex + 1)[0]?.onset ?? playedTicks(lane, cycleIndex + 1);
     const gaps = sounding.map(({ onset }, i) => (i + 1 < sounding.length ? sounding[i + 1].onset : end + next) - onset);
-    const noteLength = (gap) => gate <= 50 ? step * gate / 100 : step / 2 + (gap - step / 2) * (gate - 50) / 50;
+    const noteLength = (gap, pulse = step) => gate <= 50 ? pulse * gate / 100 : pulse / 2 + (gap - pulse / 2) * (gate - 50) / 50;
+    const bursts = ratchetDraws(lane, cycleIndex);
     const toPitch = (degree) => clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave);
     const start = cycleStart(lane, cycleIndex);
     return sounding.flatMap(({ onset, degree, count }, hit) => {
-      const before = start + onset < layoutChange.at;
-      let duration = noteLength(gaps[hit]);
-      const cut = before && start + onset + duration > layoutChange.at;
-      if (cut) duration = layoutChange.at - start - onset;
-      const note = {
-        onset,
-        duration,
-        velocity: Math.max(1, Math.min(127, velocity + (hit === 0 ? accent : 0)))
-      };
-      return allocate(lane, degree, count, toPitch, before ? layoutChange.from : voiceLayout).map(({ voice, pitch }) => ({
-        ...note,
-        pitch,
-        voice
-      }));
+      const pulses = bursts[Math.round(onset / step)] < ratchetProbability ? ratchet : 1;
+      const pulse = step / pulses;
+      return Array.from({ length: pulses }, (_, k) => k).flatMap((k) => {
+        const at = onset + k * pulse;
+        if (at >= end - 1e-6) return [];
+        const last = k === pulses - 1;
+        const before = start + at < layoutChange.at;
+        let duration = pulses === 1 ? noteLength(gaps[hit]) : noteLength(last ? gaps[hit] - k * pulse : pulse, pulse);
+        const cut = before && start + at + duration > layoutChange.at;
+        if (cut) duration = layoutChange.at - start - at;
+        const note = {
+          onset: at,
+          duration,
+          velocity: Math.max(1, Math.min(127, velocity + (hit === 0 && k === 0 ? accent : 0)))
+        };
+        return allocate(lane, degree, count, toPitch, before ? layoutChange.from : voiceLayout).map(({ voice, pitch }) => ({
+          ...note,
+          pitch,
+          voice
+        }));
+      });
     });
+  }
+  function ratchetDraws(lane, cycleIndex) {
+    const { length, seed = 0, freeze } = lanes[lane];
+    const held = typeof freeze === "number" ? freeze : freeze === "base" ? 0 : cycleIndex;
+    const rng = xoroshiro128plus(mix(seed, held) ^ RATCHET_STREAM);
+    return Array.from({ length }, () => uniformInt(rng, 0, 99999) / 1e3);
   }
   function cycleStart(lane, cycleIndex) {
     if (!resetTicks) return cycleIndex * cycleTicks(lane);

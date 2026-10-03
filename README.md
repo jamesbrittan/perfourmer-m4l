@@ -66,6 +66,7 @@ The Hub interface adheres to native Ableton Live 12 device design (169 px tall) 
 - **Gate %**: Note duration as a percentage of step length (legato ties at 100%).
 - **Velocity**: Base MIDI velocity (1–127).
 - **Accent**: Velocity boost applied to accented hits.
+- **Ratchet** (2–4) & **Ratch %**: The chance each hit plays as a quick burst of 2–4 retriggered pulses across its step. Which hits burst follows the Seed, so it repeats from the same song position.
 
 ### Tab 4: Evolve
 - **Prob %**: Probability that a hit will trigger on any given cycle.
