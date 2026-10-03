@@ -67,7 +67,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -161,7 +161,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -1001,9 +1001,11 @@ function createEngine() {
     const lastSlot = aligned ? end / gridTicks - 1 : Math.ceil(end / gridTicks) - 2;
     const at = (e, offset = 0) => (Math.min(slotOf(e.onset), lastSlot) + offset) * gridTicks;
     const events = renderCycle(lane, cycleIndex);
+    const afterNext = end + playedTicks(lane, cycleIndex + 1);
     const following = [
       ...events.map((e) => ({ ...e, start: at(e) })),
-      ...renderCycle(lane, cycleIndex + 1).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + end }))
+      ...renderCycle(lane, cycleIndex + 1).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + end })),
+      ...renderCycle(lane, cycleIndex + 2).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + afterNext }))
     ];
     const slots = /* @__PURE__ */ new Map();
     for (const e of events) {

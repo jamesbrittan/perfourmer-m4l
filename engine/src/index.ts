@@ -357,7 +357,7 @@ export function createEngine() {
    * A Cycle as the fine-grid player reads it: the notes starting in each grid slot, in slot order, each with the
    * length it should last from that slot. The player reads slot floor(position / grid) on ticks one grid step
    * apart, so a note sounds up to a slot early; lengths are measured from there. A note followed by the same pitch
-   * on its Voice (in this Cycle or the next) ends RETRIGGER_TICKS before it; one that reaches a different pitch
+   * on its Voice (in this Cycle or the next two) ends RETRIGGER_TICKS before it; one that reaches a different pitch
    * lasts LEGATO_TICKS past its start. No note is shorter than a slot.
    */
   function slotTable(lane: number, gridTicks: number, cycleIndex = 0): Slot[] {
@@ -369,9 +369,12 @@ export function createEngine() {
     const lastSlot = aligned ? end / gridTicks - 1 : Math.ceil(end / gridTicks) - 2;
     const at = (e: Event, offset = 0) => (Math.min(slotOf(e.onset), lastSlot) + offset) * gridTicks;
     const events = renderCycle(lane, cycleIndex);
+    // a Cycle's last note can tie across a following Cycle with no hits, up to the start of the one after
+    const afterNext = end + playedTicks(lane, cycleIndex + 1);
     const following = [
       ...events.map((e) => ({ ...e, start: at(e) })),
       ...renderCycle(lane, cycleIndex + 1).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + end })),
+      ...renderCycle(lane, cycleIndex + 2).map((e) => ({ ...e, start: slotOf(e.onset) * gridTicks + afterNext })),
     ];
     const slots = new Map<number, Slot["notes"]>();
     for (const e of events) {

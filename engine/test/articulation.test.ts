@@ -77,6 +77,18 @@ describe("Player table", () => {
     expect(table({ pitchCycle: [0, 2, 2], hits: 2, length: 4 }).map((s) => s.notes[0][3])).toEqual([246, 234]);
   });
 
+  it("ends a tied note before the same pitch starts again after a Cycle with no hits", () => {
+    // one hit per 2-step Cycle at 50% probability: the note before a silent Cycle ties across it to the next hit
+    const engine = createEngine();
+    engine.configure({ lanes: [{ hits: 1, length: 2, rotate: 0, gate: 100, probability: 50, seed: 3 }] });
+    const notes = Array.from({ length: 40 }, (_, c) =>
+      engine.slotTable(0, 2, c).flatMap(({ slot, notes }) => notes.map(([, , , length]) => [c * 240 + slot * 2, length])),
+    ).flat();
+    const silentCycles = 40 - notes.length;
+    expect(silentCycles).toBeGreaterThan(5);
+    notes.slice(1).forEach(([start], i) => expect(notes[i][0] + notes[i][1]).toBeLessThanOrEqual(start - 6));
+  });
+
   it("leaves a note that ends well before the next one as the gate makes it", () => {
     // 80%: half a step (60) plus 60% of the rest of the gap
     expect(table({ gate: 80, pitchCycle: [0, 2, 4] }).map((s) => s.notes[0][3])).toEqual([240, 240, 168]);
