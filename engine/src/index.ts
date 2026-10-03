@@ -56,6 +56,8 @@ export const RATES = Object.keys(RATE_TICKS) as Rate[];
  * degrees and octave octaves. gate runs from short to tied: up to 50% it is that percentage of one step; from 50%
  * to 100% the note stretches from half a step to the whole gap to the next hit, and at 100% it ties into the next.
  * accent: velocity added to the first hit of each Cycle (0 = none).
+ * swing: 50 (straight) to 75: where the offbeat of each pair of steps falls, as a % of the pair. The pairs follow the
+ * song's grid of steps, so every Lane at a Rate swings the same steps of the bar whatever its Length.
  * probability: % chance each hit sounds; mutation: 0 (the Base every Cycle) to 127 (a new pattern every Cycle);
  * seed: picks the path Mutation and probability take.
  * freeze: hold one Cycle, repeating it exactly (its Mutation and probability draws included) whatever Cycle is due;
@@ -76,6 +78,7 @@ export type LaneParams = {
   gate?: number;
   velocity?: number;
   accent?: number;
+  swing?: number;
   freeze?: number | "base";
 };
 /** Live's global scale: root 0–11 (C = 0) and the semitone intervals of its notes. */
@@ -234,12 +237,23 @@ export function createEngine() {
   }
 
   function renderCycle(lane: number, cycleIndex: number): Event[] {
-    const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0 } = lanes[lane];
+    const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0, swing = 50 } = lanes[lane];
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
-    const sounding = cycleHits(lane, cycleIndex);
+    // Swing delays the hits on odd steps of the song's grid (kept inside a Cycle a Reset cuts short)
+    const swung = (cycle: number) => {
+      const start = cycleStart(lane, cycle);
+      const delay = ((2 * swing) / 100 - 1) * step;
+      const cycleEnd = playedTicks(lane, cycle);
+      return ({ onset }: { onset: number }) => {
+        const offbeat = Math.round((start + onset) / step) % 2 === 1;
+        return offbeat && onset + delay < cycleEnd ? onset + delay : onset;
+      };
+    };
+    const sounding = cycleHits(lane, cycleIndex).map((hit) => ({ ...hit, onset: swung(cycleIndex)(hit) }));
     // the gap after the last hit runs to the next Cycle's first hit
-    const next = cycleHits(lane, cycleIndex + 1)[0]?.onset ?? playedTicks(lane, cycleIndex + 1);
+    const following = cycleHits(lane, cycleIndex + 1)[0];
+    const next = following ? swung(cycleIndex + 1)(following) : playedTicks(lane, cycleIndex + 1);
     const gaps = sounding.map(({ onset }, i) => (i + 1 < sounding.length ? sounding[i + 1].onset : end + next) - onset);
     const noteLength = (gap: number) =>
       gate <= 50 ? (step * gate) / 100 : step / 2 + ((gap - step / 2) * (gate - 50)) / 50; // short … half a step … tied

@@ -66,6 +66,7 @@ The Hub interface adheres to native Ableton Live 12 device design (169 px tall) 
 - **Gate %**: Note duration as a percentage of step length (legato ties at 100%).
 - **Velocity**: Base MIDI velocity (1–127).
 - **Accent**: Velocity boost applied to accented hits.
+- **Swing %** (50–75): Delays every other step of the song grid; 50 = straight, 67 = triplet feel, 75 = dotted.
 
 ### Tab 4: Evolve
 - **Prob %**: Probability that a hit will trigger on any given cycle.

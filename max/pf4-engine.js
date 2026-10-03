@@ -46,7 +46,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -140,7 +140,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -231,6 +231,7 @@ var RANGES = {
   gate: [1, 100],
   velocity: [1, 127],
   accent: [0, 127],
+  swing: [50, 75],
   probability: [0, 100],
   mutation: [0, 127],
   seed: [0, 999]
@@ -249,6 +250,7 @@ var LANE_DEFAULTS = [
   gate: 50,
   velocity: 100,
   accent: 0,
+  swing: 50,
   probability: 100,
   mutation: 0,
   seed: n + 1,
@@ -307,7 +309,7 @@ var controlName = (kind, lane, voice = 0) => CONTROL_NAMES[kind].replace("{lane}
 var clamp = (value, [lo, hi]) => Math.max(lo, Math.min(hi, value));
 function inRange(lane) {
   const out = { ...lane };
-  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "seed"])
+  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "swing", "probability", "mutation", "seed"])
     if (typeof out[key] === "number") out[key] = clamp(out[key], RANGES[key]);
   if (out.pitchCycle) {
     const degrees = out.pitchCycle.slice(0, PITCH_STEPS).map((d) => clamp(d, RANGES.degree));
@@ -585,11 +587,21 @@ function createEngine() {
     return sounding;
   }
   function renderCycle(lane, cycleIndex) {
-    const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0 } = lanes[lane];
+    const { transpose = 0, octave = 0, gate = 50, velocity = 100, accent = 0, swing = 50 } = lanes[lane];
     const step = stepTicks(lane);
     const end = playedTicks(lane, cycleIndex);
-    const sounding = cycleHits(lane, cycleIndex);
-    const next = cycleHits(lane, cycleIndex + 1)[0]?.onset ?? playedTicks(lane, cycleIndex + 1);
+    const swung = (cycle) => {
+      const start2 = cycleStart(lane, cycle);
+      const delay = (2 * swing / 100 - 1) * step;
+      const cycleEnd = playedTicks(lane, cycle);
+      return ({ onset }) => {
+        const offbeat = Math.round((start2 + onset) / step) % 2 === 1;
+        return offbeat && onset + delay < cycleEnd ? onset + delay : onset;
+      };
+    };
+    const sounding = cycleHits(lane, cycleIndex).map((hit) => ({ ...hit, onset: swung(cycleIndex)(hit) }));
+    const following = cycleHits(lane, cycleIndex + 1)[0];
+    const next = following ? swung(cycleIndex + 1)(following) : playedTicks(lane, cycleIndex + 1);
     const gaps = sounding.map(({ onset }, i) => (i + 1 < sounding.length ? sounding[i + 1].onset : end + next) - onset);
     const noteLength = (gap) => gate <= 50 ? step * gate / 100 : step / 2 + (gap - step / 2) * (gate - 50) / 50;
     const toPitch = (degree) => clampToMidi(degreeToNote(degree + transpose, scale) + 12 * octave);

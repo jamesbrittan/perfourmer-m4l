@@ -99,9 +99,9 @@ function pitch(n, length, ...degrees) {
   refresh(n);
 }
 
-// Gate % (short … tied), Velocity, Accent: heard from the next note, not the next Cycle
-function articulate(n, gate, velocity, accent) {
-  engine.setLane(n, { gate, velocity, accent });
+// Gate % (short … tied), Velocity, Accent, Swing %: heard from the next note, not the next Cycle
+function articulate(n, gate, velocity, accent, swing) {
+  engine.setLane(n, { gate, velocity, accent, swing });
   scheduler.changedNow(n);
 }
 

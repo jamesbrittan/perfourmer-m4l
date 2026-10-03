@@ -24,6 +24,7 @@ describe("The player, fed by the scheduler", () => {
     ["with 7th chords over four Voices", { setup: (c) => (gap(100)(c), c.lane(0, { chordShape: "7th" }), c.split("4")) }],
     ["round-robin over four Voices", { resetBars: 1, start: BAR * 9, setup: (c) => (c.lane(0, { groupMode: "round-robin" }), c.split("4")) }],
     ["with a unison pair", { setup: (c) => (gap(60)(c), c.lane(2, { groupMode: "unison" }), c.split("1+1+2")) }],
+    ["with Swing at odd Rates and Lengths", { resetBars: 1, setup: (c) => (gap(90)(c), [0, 1, 2, 3].forEach((n) => c.lane(n, { swing: 50 + 8 * n, length: 5 + 2 * n, rate: (["1/16", "1/8T", "1/16S", "1/8"] as const)[n] }))) }],
     ["with Mutation and probability", { setup: (c) => (gap(80)(c), [0, 1, 2, 3].forEach((n) => c.lane(n, { probability: 60, mutation: 127, seed: n }))) }],
   ];
   for (const [label, { start = 0, ...options }] of scenarios)

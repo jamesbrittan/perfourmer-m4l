@@ -29,6 +29,7 @@ export const RANGES = {
   gate: [1, 100],
   velocity: [1, 127],
   accent: [0, 127],
+  swing: [50, 75],
   probability: [0, 100],
   mutation: [0, 127],
   seed: [0, 999],
@@ -49,6 +50,7 @@ export const LANE_DEFAULTS: LaneParams[] = [
   gate: 50,
   velocity: 100,
   accent: 0,
+  swing: 50,
   probability: 100,
   mutation: 0,
   seed: n + 1,
@@ -103,7 +105,7 @@ const clamp = (value: number, [lo, hi]: readonly [number, number]) => Math.max(l
 /** A Lane's settings brought inside the control ranges (only the settings given). */
 export function inRange(lane: Partial<LaneParams>): Partial<LaneParams> {
   const out: Partial<LaneParams> = { ...lane };
-  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "probability", "mutation", "seed"] as const)
+  for (const key of ["hits", "length", "rotate", "transpose", "octave", "gate", "velocity", "accent", "swing", "probability", "mutation", "seed"] as const)
     if (typeof out[key] === "number") out[key] = clamp(out[key], RANGES[key]);
   if (out.pitchCycle) {
     const degrees = out.pitchCycle.slice(0, PITCH_STEPS).map((d) => clamp(d, RANGES.degree));
