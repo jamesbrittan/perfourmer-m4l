@@ -50,6 +50,7 @@ __export(index_exports, {
   createEngine: () => createEngine,
   createScheduler: () => createScheduler,
   decodeDelta: () => decodeDelta,
+  e16Pages: () => e16Pages,
   encoderCC: () => encoderCC,
   encoderSysEx: () => encoderSysEx,
   hitsControl: () => hitsControl,
@@ -57,7 +58,9 @@ __export(index_exports, {
   lengthControl: () => lengthControl,
   pageRefresh: () => pageRefresh,
   pageTitleSysEx: () => pageTitleSysEx,
+  pitchPage: () => pitchPage,
   pushCC: () => pushCC,
+  pushEncoder: () => pushEncoder,
   randomSettings: () => randomSettings,
   rateControl: () => rateControl,
   rhythmPage: () => rhythmPage,
@@ -67,7 +70,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// node_modules/pure-rand/lib/esm/distribution/uniformInt.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/distribution/uniformInt.js
 function uniformIntInternal(rng, rangeSize) {
   const MaxAllowed = rangeSize > 2 ? ~~(4294967296 / rangeSize) * rangeSize : 4294967296;
   let deltaV = rng.next() + 2147483648;
@@ -161,7 +164,7 @@ function uniformInt(rng, from, to) {
   return uniformLargeIntInternal(rng, from, to, rangeSize);
 }
 
-// node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
+// ../../perfourmer/engine/node_modules/pure-rand/lib/esm/generator/xoroshiro128plus.js
 var jumps = [
   3639956645,
   3750757012,
@@ -631,7 +634,8 @@ function rotateControl(lane, colour) {
     },
     label: (s) => String(s.rotate).padStart(4, " "),
     ring: (s) => ringScale(s.rotate, 0, Math.max(0, s.length - 1)),
-    colour
+    colour,
+    push: (s) => s.rotate ? { changes: { rotate: 0 } } : null
   };
 }
 function groupModeControl(lane) {
@@ -729,6 +733,93 @@ function rhythmPage() {
     ]
   };
 }
+function signedControl(kind, lane, colour) {
+  return {
+    ...numericControl(kind, lane, kind, (v) => (v > 0 ? `+${v}` : String(v)).padStart(4, " "), colour),
+    push: (s) => s[kind] ? { changes: { [kind]: 0 } } : null
+  };
+}
+function pitchLengthControl(lane, colour) {
+  const cycle = (s) => s.pitchCycle ?? [0];
+  return {
+    kind: "pitchLength",
+    lane,
+    value: (s) => cycle(s).length,
+    step(s, delta) {
+      const now = cycle(s);
+      const next = clamp2(now.length + delta, 1, PITCH_STEPS);
+      if (next === now.length) return null;
+      return { pitchCycle: Array.from({ length: next }, (_, i) => now[i] ?? s.pitchSteps?.[i] ?? 0) };
+    },
+    label: (s) => String(cycle(s).length).padStart(4, " "),
+    ring: (s) => ringScale(cycle(s).length, 1, PITCH_STEPS),
+    colour
+  };
+}
+var PITCH_PRESET_LABELS = {
+  "Root Drone": "Drn ",
+  "Octave Bounce": "OctB",
+  "Root & 5th": "R+5 ",
+  "Triad Up": "TrUp",
+  "Triad Arch": "TrAr",
+  "Seventh Arp": "7Arp",
+  "Alberti Bass": "Albt",
+  "Acid Octaves": "AcOc",
+  "Acid Bounce": "AcBn",
+  "Acid Slide": "AcSl",
+  "Acid Roll": "AcRl",
+  "Berlin Ostinato": "Berl",
+  "Sub Drop": "SubD",
+  "Passacaglia": "Pass",
+  "Reich Cell": "Rch ",
+  "Pendulum 3": "Pnd3",
+  "Zigzag 5": "Zig5"
+};
+function pitchPresetControl(lane, colour) {
+  let browsing = null;
+  const playing = (s) => {
+    const cycle = (s.pitchCycle ?? [0]).join();
+    return PITCH_PRESETS.findIndex((preset) => preset.degrees.join() === cycle);
+  };
+  const shown = (s) => browsing ?? playing(s);
+  return {
+    kind: "pitchPreset",
+    lane,
+    value: shown,
+    step(s, delta) {
+      const from = shown(s);
+      const next = clamp2(from < 0 ? delta > 0 ? 0 : PITCH_PRESETS.length - 1 : from + delta, 0, PITCH_PRESETS.length - 1);
+      if (next === from) return null;
+      browsing = next;
+      return {};
+    },
+    label(s) {
+      const preset = PITCH_PRESETS[shown(s)];
+      if (!preset) return "----";
+      return PITCH_PRESET_LABELS[preset.name] ?? preset.name.replace(/\s/g, "").slice(0, 4).padEnd(4, " ");
+    },
+    ring: (s) => ringScale(Math.max(0, shown(s)), 0, PITCH_PRESETS.length - 1),
+    colour,
+    push(s) {
+      const index = shown(s);
+      browsing = null;
+      return index < 0 ? null : { changes: {}, pitchPreset: index + 1 };
+    }
+  };
+}
+function pitchPage() {
+  const quadrant = (n) => [
+    [signedControl("transpose", n, LANE_COLOURS[n]), signedControl("octave", n, LANE_COLOURS[n])],
+    [pitchLengthControl(n, LANE_COLOURS[n]), pitchPresetControl(n, LANE_COLOURS[n])]
+  ];
+  const [q1, q2, q3, q4] = [0, 1, 2, 3].map(quadrant);
+  return { title: "PIT ", encoders: [...q1[0], ...q2[0], ...q1[1], ...q2[1], ...q3[0], ...q4[0], ...q3[1], ...q4[1]] };
+}
+function e16Pages() {
+  const pages = [rhythmPage(), pitchPage()];
+  const blank = { title: "    ", encoders: Array.from({ length: 16 }, () => null) };
+  return { page: (index) => pages[index] ?? blank };
+}
 function stepEncoder(page, encoder, delta, settings) {
   const control = page.encoders[encoder];
   if (!control) return null;
@@ -737,6 +828,11 @@ function stepEncoder(page, encoder, delta, settings) {
   const after = { ...settings, ...changes };
   const sysex = encoderSysEx(encoder, control.ring(after), control.label(after), control.colour);
   return { changes, sysex, lane: control.lane };
+}
+function pushEncoder(page, encoder, settings) {
+  const control = page.encoders[encoder];
+  const result = control?.push?.(settings);
+  return control && result ? { lane: control.lane, ...result } : null;
 }
 function pageRefresh(page, laneSettings) {
   const messages = [pageTitleSysEx(page.title)];

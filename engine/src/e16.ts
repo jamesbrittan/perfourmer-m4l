@@ -9,8 +9,8 @@
  * Nothing here depends on Max: it's tested in Node alongside the engine.
  */
 
-import { RATES, GROUP_MODES, CHORD_SHAPES, type Rate, type LaneParams } from "./index";
-import { RANGES } from "./device";
+import { RATES, GROUP_MODES, CHORD_SHAPES, PITCH_PRESETS, type Rate, type LaneParams } from "./index";
+import { RANGES, PITCH_STEPS } from "./device";
 
 // ─── CC protocol (E16 → Hub) ────────────────────────────────────────────────
 //
@@ -108,6 +108,13 @@ export function pageTitleSysEx(title: string): number[] {
 // The test scope (Issue #12) uses a single page with Rate, Length and Hits for
 // one Lane. The full layout will map the Hub's tabs to E16 pages.
 
+/** A Lane's settings as the E16 sees them: pitchSteps are all the Pitch Cycle editor's degrees, including any past
+ * the Pitch Length (so lengthening the Cycle brings them back). */
+export type E16Settings = LaneParams & { pitchSteps?: readonly number[] };
+
+/** What a push does: settings to apply, and/or a Pitch Preset to load (its menu item, from 1). */
+export type E16Push = { changes: Partial<LaneParams>; pitchPreset?: number };
+
 /** A control the E16 can step through. */
 export type E16Control = {
   /** What the control is: its name in the Hub. */
@@ -116,14 +123,17 @@ export type E16Control = {
   lane: number;
   /** The current value (an index for enumerated controls, a number for ranges). */
   value: (settings: Readonly<LaneParams>) => number;
-  /** Step the value by delta (+1 or −1), returning the new settings to apply. Handles clamping. */
-  step: (settings: Readonly<LaneParams>, delta: number) => Partial<LaneParams> | null;
+  /** Step the value by delta (+1 or −1), returning the new settings to apply ({} = only the display changes, null =
+   * nothing changes). Handles clamping. */
+  step: (settings: Readonly<E16Settings>, delta: number) => Partial<LaneParams> | null;
   /** A 4-character label for the E16's screen. */
-  label: (settings: Readonly<LaneParams>) => string;
+  label: (settings: Readonly<E16Settings>) => string;
   /** LED ring position (0–127). */
-  ring: (settings: Readonly<LaneParams>) => number;
+  ring: (settings: Readonly<E16Settings>) => number;
   /** LED colour. */
   colour?: { r: number; g: number; b: number };
+  /** What a push on the encoder does; null or absent = nothing. */
+  push?: (settings: Readonly<E16Settings>) => E16Push | null;
 };
 
 // ─── Control definitions ────────────────────────────────────────────────────
@@ -265,6 +275,7 @@ export function rotateControl(lane: number, colour?: { r: number; g: number; b: 
     label: (s) => String(s.rotate).padStart(4, " "),
     ring: (s) => ringScale(s.rotate, 0, Math.max(0, s.length - 1)),
     colour,
+    push: (s) => (s.rotate ? { changes: { rotate: 0 } } : null),
   };
 }
 
@@ -386,6 +397,94 @@ export function rhythmPage(): E16Page {
   };
 }
 
+/** Transpose or Octave: signed labels, and a push back to 0. */
+function signedControl(kind: "transpose" | "octave", lane: number, colour?: { r: number; g: number; b: number }): E16Control {
+  return {
+    ...numericControl(kind, lane, kind, (v) => (v > 0 ? `+${v}` : String(v)).padStart(4, " "), colour),
+    push: (s) => (s[kind] ? { changes: { [kind]: 0 } } : null),
+  };
+}
+
+/** Pitch Length: shortens the Pitch Cycle, or lengthens it with the editor's degrees past its end (0 if unknown). */
+function pitchLengthControl(lane: number, colour?: { r: number; g: number; b: number }): E16Control {
+  const cycle = (s: Readonly<E16Settings>) => s.pitchCycle ?? [0];
+  return {
+    kind: "pitchLength",
+    lane,
+    value: (s) => cycle(s).length,
+    step(s, delta) {
+      const now = cycle(s);
+      const next = clamp(now.length + delta, 1, PITCH_STEPS);
+      if (next === now.length) return null;
+      return { pitchCycle: Array.from({ length: next }, (_, i) => now[i] ?? s.pitchSteps?.[i] ?? 0) };
+    },
+    label: (s) => String(cycle(s).length).padStart(4, " "),
+    ring: (s) => ringScale(cycle(s).length, 1, PITCH_STEPS),
+    colour,
+  };
+}
+
+/** Pitch Presets on the E16's 4-character screen (any preset missing here shows its first letters). */
+const PITCH_PRESET_LABELS: Record<string, string> = {
+  "Root Drone": "Drn ", "Octave Bounce": "OctB", "Root & 5th": "R+5 ", "Triad Up": "TrUp", "Triad Arch": "TrAr",
+  "Seventh Arp": "7Arp", "Alberti Bass": "Albt", "Acid Octaves": "AcOc", "Acid Bounce": "AcBn", "Acid Slide": "AcSl",
+  "Acid Roll": "AcRl", "Berlin Ostinato": "Berl", "Sub Drop": "SubD", "Passacaglia": "Pass", "Reich Cell": "Rch ",
+  "Pendulum 3": "Pnd3", "Zigzag 5": "Zig5",
+};
+
+/** Pitch Preset: turning browses the presets (the Lane keeps playing its Pitch Cycle); a push loads the one shown.
+ * Until it's turned, it shows the preset the Lane plays, or dashes. */
+function pitchPresetControl(lane: number, colour?: { r: number; g: number; b: number }): E16Control {
+  let browsing: number | null = null; // the preset shown while browsing, from 0
+  const playing = (s: Readonly<E16Settings>) => {
+    const cycle = (s.pitchCycle ?? [0]).join();
+    return PITCH_PRESETS.findIndex((preset) => preset.degrees.join() === cycle);
+  };
+  const shown = (s: Readonly<E16Settings>) => browsing ?? playing(s);
+  return {
+    kind: "pitchPreset",
+    lane,
+    value: shown,
+    step(s, delta) {
+      const from = shown(s);
+      const next = clamp(from < 0 ? (delta > 0 ? 0 : PITCH_PRESETS.length - 1) : from + delta, 0, PITCH_PRESETS.length - 1);
+      if (next === from) return null;
+      browsing = next;
+      return {};
+    },
+    label(s) {
+      const preset = PITCH_PRESETS[shown(s)];
+      if (!preset) return "----";
+      return PITCH_PRESET_LABELS[preset.name] ?? preset.name.replace(/\s/g, "").slice(0, 4).padEnd(4, " ");
+    },
+    ring: (s) => ringScale(Math.max(0, shown(s)), 0, PITCH_PRESETS.length - 1),
+    colour,
+    push(s) {
+      const index = shown(s);
+      browsing = null;
+      return index < 0 ? null : { changes: {}, pitchPreset: index + 1 };
+    },
+  };
+}
+
+/** Pitch page: Transpose and Octave above Pitch Length and Pitch Preset, in each Lane's quadrant. */
+export function pitchPage(): E16Page {
+  const quadrant = (n: number) => [
+    [signedControl("transpose", n, LANE_COLOURS[n]), signedControl("octave", n, LANE_COLOURS[n])],
+    [pitchLengthControl(n, LANE_COLOURS[n]), pitchPresetControl(n, LANE_COLOURS[n])],
+  ];
+  const [q1, q2, q3, q4] = [0, 1, 2, 3].map(quadrant);
+  return { title: "PIT ", encoders: [...q1[0], ...q2[0], ...q1[1], ...q2[1], ...q3[0], ...q4[0], ...q3[1], ...q4[1]] };
+}
+
+/** The E16's pages, in the Hub's tab order: 1 Rhythm, 2 Pitch. The others are blank for now. Each page is made once,
+ * so what it holds (a preset being browsed) lasts while the E16 shows other pages. */
+export function e16Pages() {
+  const pages = [rhythmPage(), pitchPage()];
+  const blank: E16Page = { title: "    ", encoders: Array.from({ length: 16 }, () => null) };
+  return { page: (index: number): E16Page => pages[index] ?? blank };
+}
+
 // ─── Stepping + feedback (called by the Hub) ────────────────────────────────
 
 /**
@@ -397,7 +496,7 @@ export function stepEncoder(
   page: E16Page,
   encoder: number,
   delta: number,
-  settings: Readonly<LaneParams>,
+  settings: Readonly<E16Settings>,
 ): { changes: Partial<LaneParams>; sysex: number[]; lane: number } | null {
   const control = page.encoders[encoder];
   if (!control) return null;
@@ -409,6 +508,13 @@ export function stepEncoder(
   return { changes, sysex, lane: control.lane };
 }
 
+/** Process an encoder push: what it does for which Lane, or null if nothing (no push action, or already there). */
+export function pushEncoder(page: E16Page, encoder: number, settings: Readonly<E16Settings>): (E16Push & { lane: number }) | null {
+  const control = page.encoders[encoder];
+  const result = control?.push?.(settings);
+  return control && result ? { lane: control.lane, ...result } : null;
+}
+
 /**
  * Build the SysEx for every encoder on a page, reflecting the current state.
  * Called when a page is entered, or when a value changes from another source
@@ -416,7 +522,7 @@ export function stepEncoder(
  */
 export function pageRefresh(
   page: E16Page,
-  laneSettings: (lane: number) => Readonly<LaneParams>,
+  laneSettings: (lane: number) => Readonly<E16Settings>,
 ): number[][] {
   const messages: number[][] = [pageTitleSysEx(page.title)];
   for (let i = 0; i < page.encoders.length; i++) {
@@ -446,7 +552,7 @@ export function createE16Display(page: E16Page) {
     return true;
   };
   return {
-    update: (laneSettings: (lane: number) => Readonly<LaneParams>): number[][] =>
+    update: (laneSettings: (lane: number) => Readonly<E16Settings>): number[][] =>
       pageRefresh(page, laneSettings).filter(keep),
     sent(message: number[]) {
       keep(message);

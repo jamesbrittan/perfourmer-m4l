@@ -689,10 +689,11 @@ def build_hub():
         P.c(lane, prep); P.c(prep, adapter)
 
         # Randomise / Undo: "<control> <value>" for this Lane, to the controls themselves
-        names = ["length", "hits", "rotate", "rate", "degree", "pitchLength", "probability", "mutation", "seed"]
+        names = ["length", "hits", "rotate", "rate", "degree", "pitchLength", "transpose", "octave", "probability",
+                 "mutation", "seed"]
         to_control = P.obj("route " + " ".join(names), lx, Y + 1130, ins=2, outs=len(names) + 1)
         P.c(control_lanes, to_control, n)
-        for i, box in enumerate((length, hits, rotate, rate, None, plen, prob, mut, seed)):
+        for i, box in enumerate((length, hits, rotate, rate, None, plen, trans, octv, prob, mut, seed)):
             if box:
                 P.c(to_control, box, i)
         to_degree = P.obj("route " + " ".join(str(i) for i in range(PITCH_STEPS)), lx, Y + 1160, ins=2,
