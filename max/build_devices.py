@@ -420,6 +420,29 @@ def build_hub():
     P.c(poll, poll_pos); P.c(poll_pos, where, 7); P.c(where, adapter); P.c(adapter, readouts, OUT["readouts"])
     P.c(load, adapter)                               # render every Lane once
 
+    # --- E16 Hardware Integration (ControlSurface live.object + live.path)
+    e16_path = P.obj("live.path", 1000, Y + 200, ins=1, outs=3, varname="e16_path")
+    e16_obj = P.obj("live.object", 1000, Y + 260, ins=2, outs=2, varname="e16_object")
+    P.c(e16_path, e16_obj, 0, 1)  # live.object only sends SysEx, if the adapter's own call fails
+    P.c(adapter, e16_obj, OUT["e16"], 0)
+    # the adapter points e16_path at the MaxForLive surface once it has found it, never at another controller
+
+    # --- The E16's CCs, from its port and from the track's MIDI input, channel 1 only (the E16's USB output always uses channel 1). The adapter listens to one
+    # route at a time and ignores the other's copies.
+    for i, (route, text) in enumerate([("port", 'midiin "OXI E16 (Port 1)"'), ("track", "midiin")]):
+        x = 1000 + i * 200
+        midiin = P.obj(text, x, Y + 340, ins=1, outs=1)
+        midiparse = P.obj("midiparse", x, Y + 380, ins=1, outs=7)
+        is_ch16 = P.obj("== 1", x + 100, Y + 410, ins=2)
+        gate_ch16 = P.obj("gate 1 0", x, Y + 440, ins=2, outs=1)
+        prep_cc = P.obj(f"prepend e16in {route}", x, Y + 470)
+        P.c(midiin, midiparse, 0, 0)
+        P.c(midiparse, is_ch16, 6, 0)     # outlet 6 is the MIDI channel (fires first, right-to-left)
+        P.c(is_ch16, gate_ch16, 0, 0)     # open on channel 1
+        P.c(midiparse, gate_ch16, 2, 1)   # outlet 2 is [cc, value]
+        P.c(gate_ch16, prep_cc, 0, 0)
+        P.c(prep_cc, adapter, 0, 0)
+
     # --- clock: fine tick grid (ticket 01 verdict), fanned out to every Lane
     clock = P.obj(f"metro {GRID_TICKS} ticks @quantize {GRID_TICKS} ticks @active 1", 600, Y, ins=2)
     pos = P.obj("transport", 600, Y + 30, ins=2, outs=9)

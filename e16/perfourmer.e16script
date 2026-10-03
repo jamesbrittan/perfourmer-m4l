@@ -1,0 +1,171 @@
+-- Lane 1 (Quadrant 1: Knobs 1, 2, 5, 6)
+--@assign id=1  abbr="Hits" name="L1 Hits"   desc="Lane 1 Hits"   manual=true g=1
+--@assign id=17 abbr="Hits" name="L1 Hits P" desc="Lane 1 Hits P" p=true      g=1
+
+--@assign id=2  abbr="Len"  name="L1 Length" desc="Lane 1 Length" manual=true g=2
+--@assign id=18 abbr="Len"  name="L1 Len P"  desc="Lane 1 Len P"  p=true      g=2
+
+-- Lane 2 (Quadrant 2: Knobs 3, 4, 7, 8)
+--@assign id=3  abbr="Hits" name="L2 Hits"   desc="Lane 2 Hits"   manual=true g=3
+--@assign id=19 abbr="Hits" name="L2 Hits P" desc="Lane 2 Hits P" p=true      g=3
+
+--@assign id=4  abbr="Len"  name="L2 Length" desc="Lane 2 Length" manual=true g=4
+--@assign id=20 abbr="Len"  name="L2 Len P"  desc="Lane 2 Len P"  p=true      g=4
+
+-- Lane 1 (Quadrant 1 bottom)
+--@assign id=5  abbr="Rot"  name="L1 Rotate" desc="Lane 1 Rotate" manual=true g=5
+--@assign id=21 abbr="Rot"  name="L1 Rot P"  desc="Lane 1 Rot P"  p=true      g=5
+
+--@assign id=6  abbr="Rate" name="L1 Rate"   desc="Lane 1 Rate"   manual=true g=6
+--@assign id=22 abbr="Rate" name="L1 Rate P" desc="Lane 1 Rate P" p=true      g=6
+
+-- Lane 2 (Quadrant 2 bottom)
+--@assign id=7  abbr="Rot"  name="L2 Rotate" desc="Lane 2 Rotate" manual=true g=7
+--@assign id=23 abbr="Rot"  name="L2 Rot P"  desc="Lane 2 Rot P"  p=true      g=7
+
+--@assign id=8  abbr="Rate" name="L2 Rate"   desc="Lane 2 Rate"   manual=true g=8
+--@assign id=24 abbr="Rate" name="L2 Rate P" desc="Lane 2 Rate P" p=true      g=8
+
+-- Lane 3 (Quadrant 3: Knobs 9, 10, 13, 14)
+--@assign id=9  abbr="Hits" name="L3 Hits"   desc="Lane 3 Hits"   manual=true g=9
+--@assign id=25 abbr="Hits" name="L3 Hits P" desc="Lane 3 Hits P" p=true      g=9
+
+--@assign id=10 abbr="Len"  name="L3 Length" desc="Lane 3 Length" manual=true g=10
+--@assign id=26 abbr="Len"  name="L3 Len P"  desc="Lane 3 Len P"  p=true      g=10
+
+-- Lane 4 (Quadrant 4: Knobs 11, 12, 15, 16)
+--@assign id=11 abbr="Hits" name="L4 Hits"   desc="Lane 4 Hits"   manual=true g=11
+--@assign id=27 abbr="Hits" name="L4 Hits P" desc="Lane 4 Hits P" p=true      g=11
+
+--@assign id=12 abbr="Len"  name="L4 Length" desc="Lane 4 Length" manual=true g=12
+--@assign id=28 abbr="Len"  name="L4 Len P"  desc="Lane 4 Len P"  p=true      g=12
+
+-- Lane 3 (Quadrant 3 bottom)
+--@assign id=13 abbr="Rot"  name="L3 Rotate" desc="Lane 3 Rotate" manual=true g=13
+--@assign id=29 abbr="Rot"  name="L3 Rot P"  desc="Lane 3 Rot P"  p=true      g=13
+
+--@assign id=14 abbr="Rate" name="L3 Rate"   desc="Lane 3 Rate"   manual=true g=14
+--@assign id=30 abbr="Rate" name="L3 Rate P" desc="Lane 3 Rate P" p=true      g=14
+
+-- Lane 4 (Quadrant 4 bottom)
+--@assign id=15 abbr="Rot"  name="L4 Rotate" desc="Lane 4 Rotate" manual=true g=15
+--@assign id=31 abbr="Rot"  name="L4 Rot P"  desc="Lane 4 Rot P"  p=true      g=15
+
+--@assign id=16 abbr="Rate" name="L4 Rate"   desc="Lane 4 Rate"   manual=true g=16
+--@assign id=32 abbr="Rate" name="L4 Rate P" desc="Lane 4 Rate P" p=true      g=16
+
+-- Perfourmer Hub <-> OXI E16 Controller Script
+--
+-- Protocol:
+--   Turn: Relative CC on Channel 1 (0-indexed 0), CC 20-35 (65=+1, 63=-1)
+--   Push: CC on Channel 1, CC 40-55 (127 on press)
+--   Page: CC on Channel 1, CC 119 (0-11)
+--   SysEx: F0 00 7F 7F 01 <enc 0-15 or 7F> <ring 0-127> <colour 0-99> <unused> <unused> <c0-c3> F7
+
+-- LED colours (leds.updateByIndex's colour argument) are an index into the OXI App's 100-colour palette,
+-- 0-99, not the 0-15 the Lua API doc describes. Approximate ranges, seen on the E16 with full rings:
+--   0-4    purple              35-45  yellows              73-83  more blues
+--   5-12   blue                46-56  pinks                84-86  turquoise
+--   13-21  lighter blue        57-63  reds                 87-99  greens
+--   22-26  lighter blue again  64-72  more pinks
+--   27-33  light purple
+--   34     blue/white
+-- The Lanes use 0 (purple), 40 (yellow), 70 (pink) and 90 (green), set by the Hub (LANE_COLOURS).
+-- Rings must be drawn with leds.updateByIndex: leds.update addresses a control by script ID, and the normal
+-- encoder view then shows the control's own scene colour instead.
+
+local VERSION      = "v8"  -- shown in the page title, to check which script the E16 is running
+local MIDI_CH      = 0     -- MIDI channel 1 (0-indexed); output 3 sent channel 1 even when asked for 16
+local ENC_CC_BASE  = 20    -- first encoder CC
+local PUSH_CC_BASE = 40    -- first push CC
+local PAGE_CC      = 119   -- page-change CC
+
+-- Output 3 is the one that reaches the computer over USB; output 0 ("all outputs" in the API doc) didn't in testing.
+-- Send on one output only, so each click arrives once.
+local CC_OUT = 3
+
+local function send_cc(ch, cc, val)
+  midi.sendCC(CC_OUT, ch, cc, val)
+end
+
+function page.onInit()
+  page.setTitle("PF4 Hub " .. VERSION)
+  -- Request initial values from Hub by announcing page 0
+  send_cc(MIDI_CH, PAGE_CC, 0)
+end
+
+function controller.onEncoderTurn(enc)
+  local enc_num
+  if enc.index and enc.index >= 1 and enc.index <= 16 then
+    enc_num = enc.index - 1
+  elseif enc.id and enc.id >= 1 and enc.id <= 16 then
+    enc_num = enc.id - 1
+  end
+  if not enc_num then return end  -- not one of ours
+
+  local inc = enc.increment or 0
+  if inc == 0 then return end
+
+  -- Clamp delta to strictly +/-1 per click to guarantee 1 click = 1 value step
+  local delta = (inc > 0) and 1 or -1
+
+  -- Relative CC: 65 = +1, 63 = -1
+  local cc_val = 64 + delta
+
+  send_cc(MIDI_CH, ENC_CC_BASE + enc_num, cc_val)
+end
+
+function controller.onEncoderPress(enc)
+  local enc_num
+  if enc.index and enc.index >= 1 and enc.index <= 16 then
+    enc_num = enc.index - 1
+  elseif enc.id and enc.id >= 17 and enc.id <= 32 then
+    enc_num = enc.id - 17
+  elseif enc.id and enc.id >= 1 and enc.id <= 16 then
+    enc_num = enc.id - 1
+  end
+  if not enc_num then return end  -- not one of ours
+
+  send_cc(MIDI_CH, PUSH_CC_BASE + enc_num, 127)
+end
+
+function page.onPageChange(prev, curr)
+  for i = 1, 16 do
+    leds.reset(i)
+    slots.reset(i)
+  end
+  if curr then
+    send_cc(MIDI_CH, PAGE_CC, curr - 1)
+  end
+end
+
+function controller.onSysex(bytes)
+  -- SysEx framing: F0 00 7F 7F 01 <enc> <ring> <r> <g> <b> <c0> <c1> <c2> <c3> F7
+  if not bytes or #bytes < 15 then return end
+  if bytes[1] ~= 0xF0 or bytes[2] ~= 0x00 or bytes[3] ~= 0x7F or bytes[4] ~= 0x7F or bytes[5] ~= 0x01 then
+    return
+  end
+  if bytes[#bytes] ~= 0xF7 then return end
+
+  local enc  = bytes[6]
+  local ring = bytes[7]
+  local r    = bytes[8]
+  local label = string.char(bytes[11], bytes[12], bytes[13], bytes[14])
+
+  if enc == 0x7F then
+    page.setTitle(label .. " " .. VERSION)
+  elseif enc >= 0 and enc < 16 then
+    local slot = enc + 1
+    slots.update(slot, label)
+
+    -- LED ring position (0-127 -> 0-16383)
+    local ring_val = (ring * 16383) // 127
+
+    -- Colour: an index into the OXI App's 100-colour palette (0-99), not the API doc's 0-15
+    local color = r
+    if color > 99 then color = 99 end
+    -- By physical position: leds.update addresses a control by script ID, and in the normal view the
+    -- E16 then draws the control's own scene colour instead of ours
+    leds.updateByIndex(slot, ring_val, color)
+  end
+end

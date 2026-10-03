@@ -22,27 +22,48 @@ var index_exports = {};
 __export(index_exports, {
   CHORD_SHAPES: () => CHORD_SHAPES,
   CONTROL_NAMES: () => CONTROL_NAMES,
+  E16_CHANNEL: () => E16_CHANNEL,
+  ENCODER_CC_BASE: () => ENCODER_CC_BASE,
   FREEZE_BASE: () => FREEZE_BASE,
   FREEZE_OFF: () => FREEZE_OFF,
   GROUP_MODES: () => GROUP_MODES,
   HUB_OUTLETS: () => HUB_OUTLETS,
   LANES: () => LANES,
+  LANE_COLOURS: () => LANE_COLOURS,
   LANE_DEFAULTS: () => LANE_DEFAULTS,
+  PAGE_CC: () => PAGE_CC,
   PITCH_PRESETS: () => PITCH_PRESETS,
   PITCH_STEPS: () => PITCH_STEPS,
   PLAYER: () => PLAYER,
   PLAYER_POSITION: () => PLAYER_POSITION,
+  PUSH_CC_BASE: () => PUSH_CC_BASE,
   RANDOM_GROUPS: () => RANDOM_GROUPS,
   RANGES: () => RANGES,
   RATES: () => RATES,
+  REL_DECREMENT: () => REL_DECREMENT,
+  REL_INCREMENT: () => REL_INCREMENT,
   RHYTHM_PRESETS: () => RHYTHM_PRESETS,
   SPLITS: () => SPLITS,
   VOICES: () => VOICES,
   controlName: () => controlName,
+  createE16Display: () => createE16Display,
   createEngine: () => createEngine,
   createScheduler: () => createScheduler,
+  decodeDelta: () => decodeDelta,
+  encoderCC: () => encoderCC,
+  encoderSysEx: () => encoderSysEx,
+  hitsControl: () => hitsControl,
   inRange: () => inRange,
-  randomSettings: () => randomSettings
+  lengthControl: () => lengthControl,
+  pageRefresh: () => pageRefresh,
+  pageTitleSysEx: () => pageTitleSysEx,
+  pushCC: () => pushCC,
+  randomSettings: () => randomSettings,
+  rateControl: () => rateControl,
+  rhythmPage: () => rhythmPage,
+  rotateControl: () => rotateControl,
+  stepEncoder: () => stepEncoder,
+  testPage: () => testPage
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -287,8 +308,10 @@ var HUB_OUTLETS = {
   // "<lane> <control> <value>" to move a Lane's controls (Randomise and its Undo)
   pitchPresetBoxes: 15,
   // "<lane> <length> <deg0> ... <deg7>" from a Pitch Preset
-  pitchPresetMenus: 16
+  pitchPresetMenus: 16,
   // "<lane> set 0": the Pitch Preset menu back to "—"
+  e16: 17
+  // SysEx bytes to the E16 via send_midi
 };
 var FREEZE_OFF = -1;
 var FREEZE_BASE = -2;
@@ -444,6 +467,305 @@ function createScheduler({ engine, lanes, gridTicks, bankSize, playingBank: repo
      * judged from a stale one, a change made just after an earlier one landed would take it as still to come. */
     changePosition() {
       return playing ? Math.max(polledAt, ...adoptedAt.map((at) => at ?? -Infinity)) : void 0;
+    }
+  };
+}
+
+// src/e16.ts
+var E16_CHANNEL = 0;
+var ENCODER_CC_BASE = 20;
+var encoderCC = (encoder) => ENCODER_CC_BASE + encoder;
+var PUSH_CC_BASE = 40;
+var pushCC = (encoder) => PUSH_CC_BASE + encoder;
+var PAGE_CC = 119;
+var REL_INCREMENT = 65;
+var REL_DECREMENT = 63;
+function decodeDelta(value) {
+  if (value === REL_INCREMENT) return 1;
+  if (value === REL_DECREMENT) return -1;
+  if (value > 64) return value - 64;
+  if (value < 64) return value - 64;
+  return 0;
+}
+var SYSEX_HEADER = [240, 0, 127, 127, 1];
+var SYSEX_END = 247;
+function encoderSysEx(encoder, ring, label, colour = { r: 0, g: 127, b: 40 }) {
+  const chars = label.padEnd(4, " ").slice(0, 4);
+  return [
+    ...SYSEX_HEADER,
+    encoder & 127,
+    ring & 127,
+    colour.r & 127,
+    colour.g & 127,
+    colour.b & 127,
+    chars.charCodeAt(0) & 127,
+    chars.charCodeAt(1) & 127,
+    chars.charCodeAt(2) & 127,
+    chars.charCodeAt(3) & 127,
+    SYSEX_END
+  ];
+}
+function pageTitleSysEx(title) {
+  const chars = title.padEnd(4, " ").slice(0, 4);
+  return [
+    ...SYSEX_HEADER,
+    127,
+    // page title, not an encoder
+    0,
+    0,
+    0,
+    0,
+    // ring/colour unused
+    chars.charCodeAt(0) & 127,
+    chars.charCodeAt(1) & 127,
+    chars.charCodeAt(2) & 127,
+    chars.charCodeAt(3) & 127,
+    SYSEX_END
+  ];
+}
+var RATE_LABELS = {
+  "1/1": "1/1 ",
+  "1/2": "1/2 ",
+  "1/4": "1/4 ",
+  "1/4T": "1/4T",
+  "1/8": "1/8 ",
+  "1/8T": "1/8T",
+  "1/16": "1/16",
+  "1/16Q": "16Q ",
+  "1/16T": "16T ",
+  "1/16S": "16S ",
+  "1/32": "1/32",
+  "1/32Q": "32Q "
+};
+var clamp2 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+var LANE_COLOURS = [
+  { r: 0, g: 0, b: 0 },
+  // Lane 1: purple
+  { r: 40, g: 0, b: 0 },
+  // Lane 2: yellow
+  { r: 70, g: 0, b: 0 },
+  // Lane 3: pink
+  { r: 90, g: 0, b: 0 }
+  // Lane 4: green
+];
+var ringScale = (value, lo, hi) => hi === lo ? 64 : Math.round((value - lo) / (hi - lo) * 127);
+function numericControl(kind, lane, param, labelFn, colour) {
+  const [lo, hi] = RANGES[param];
+  return {
+    kind,
+    lane,
+    value: (s) => s[param] ?? lo,
+    step(s, delta) {
+      const current = s[param] ?? lo;
+      const next = clamp2(current + delta, lo, hi);
+      if (next === current) return null;
+      return { [param]: next };
+    },
+    label: labelFn ? (s) => labelFn(s[param] ?? lo, s) : (s) => String(s[param] ?? lo).padStart(4, " "),
+    ring: (s) => ringScale(s[param] ?? lo, lo, hi),
+    colour
+  };
+}
+function rateControl(lane, colour) {
+  return {
+    kind: "rate",
+    lane,
+    value: (s) => RATES.indexOf(s.rate ?? "1/16"),
+    step(s, delta) {
+      const idx = RATES.indexOf(s.rate ?? "1/16");
+      const next = clamp2(idx + delta, 0, RATES.length - 1);
+      if (next === idx) return null;
+      return { rate: RATES[next] };
+    },
+    label: (s) => RATE_LABELS[s.rate ?? "1/16"],
+    ring: (s) => ringScale(RATES.indexOf(s.rate ?? "1/16"), 0, RATES.length - 1),
+    colour
+  };
+}
+function lengthControl(lane, colour) {
+  const [lo, hi] = RANGES.length;
+  return {
+    kind: "length",
+    lane,
+    value: (s) => s.length,
+    step(s, delta) {
+      const next = clamp2(s.length + delta, lo, hi);
+      if (next === s.length) return null;
+      const out = { length: next };
+      if (s.hits > next) out.hits = next;
+      if (s.rotate >= next) out.rotate = next - 1;
+      return out;
+    },
+    label: (s) => String(s.length).padStart(4, " "),
+    ring: (s) => ringScale(s.length, lo, hi),
+    colour
+  };
+}
+function hitsControl(lane, colour) {
+  const lo = RANGES.hits[0];
+  return {
+    kind: "hits",
+    lane,
+    value: (s) => s.hits,
+    step(s, delta) {
+      const hi = s.length;
+      const next = clamp2(s.hits + delta, lo, hi);
+      if (next === s.hits) return null;
+      return { hits: next };
+    },
+    label: (s) => String(s.hits).padStart(4, " "),
+    ring: (s) => ringScale(s.hits, lo, s.length),
+    colour
+  };
+}
+function rotateControl(lane, colour) {
+  return {
+    kind: "rotate",
+    lane,
+    value: (s) => s.rotate,
+    step(s, delta) {
+      const hi = Math.max(0, s.length - 1);
+      const next = clamp2(s.rotate + delta, 0, hi);
+      if (next === s.rotate) return null;
+      return { rotate: next };
+    },
+    label: (s) => String(s.rotate).padStart(4, " "),
+    ring: (s) => ringScale(s.rotate, 0, Math.max(0, s.length - 1)),
+    colour
+  };
+}
+function groupModeControl(lane) {
+  const labels = { poly: "poly", "round-robin": "r-rb", unison: "unis" };
+  return {
+    kind: "groupMode",
+    lane,
+    value: (s) => GROUP_MODES.indexOf(s.groupMode ?? "poly"),
+    step(s, delta) {
+      const idx = GROUP_MODES.indexOf(s.groupMode ?? "poly");
+      const next = clamp2(idx + delta, 0, GROUP_MODES.length - 1);
+      if (next === idx) return null;
+      return { groupMode: GROUP_MODES[next] };
+    },
+    label: (s) => labels[s.groupMode ?? "poly"] ?? "poly",
+    ring: (s) => ringScale(GROUP_MODES.indexOf(s.groupMode ?? "poly"), 0, GROUP_MODES.length - 1)
+  };
+}
+function chordShapeControl(lane) {
+  const names = Object.keys(CHORD_SHAPES);
+  const labels = {
+    unison: "unis",
+    "5th": " 5th",
+    triad: "trID",
+    "7th": " 7th",
+    sus2: "sus2",
+    sus4: "sus4",
+    "6th": " 6th",
+    add9: "add9",
+    quartal: "qrtl",
+    "open triad": "opTR",
+    octaves: "oct "
+  };
+  return {
+    kind: "chordShape",
+    lane,
+    value: (s) => names.indexOf(s.chordShape ?? "triad"),
+    step(s, delta) {
+      const idx = names.indexOf(s.chordShape ?? "triad");
+      const next = clamp2(idx + delta, 0, names.length - 1);
+      if (next === idx) return null;
+      return { chordShape: names[next] };
+    },
+    label: (s) => labels[s.chordShape ?? "triad"] ?? "    ",
+    ring: (s) => ringScale(names.indexOf(s.chordShape ?? "triad"), 0, names.length - 1)
+  };
+}
+function testPage() {
+  return {
+    title: "TST ",
+    encoders: [
+      rateControl(0),
+      lengthControl(0),
+      hitsControl(0),
+      rotateControl(0),
+      numericControl("gate", 0, "gate", (v) => v === 100 ? "tied" : `${v}%`.padStart(4, " ")),
+      numericControl("velocity", 0, "velocity"),
+      numericControl("accent", 0, "accent"),
+      numericControl("probability", 0, "probability", (v) => `${v}%`.padStart(4, " ")),
+      numericControl("mutation", 0, "mutation"),
+      groupModeControl(0),
+      chordShapeControl(0),
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  };
+}
+function rhythmPage() {
+  return {
+    title: "RHY ",
+    encoders: [
+      // Row 0
+      hitsControl(0, LANE_COLOURS[0]),
+      lengthControl(0, LANE_COLOURS[0]),
+      hitsControl(1, LANE_COLOURS[1]),
+      lengthControl(1, LANE_COLOURS[1]),
+      // Row 1
+      rotateControl(0, LANE_COLOURS[0]),
+      rateControl(0, LANE_COLOURS[0]),
+      rotateControl(1, LANE_COLOURS[1]),
+      rateControl(1, LANE_COLOURS[1]),
+      // Row 2
+      hitsControl(2, LANE_COLOURS[2]),
+      lengthControl(2, LANE_COLOURS[2]),
+      hitsControl(3, LANE_COLOURS[3]),
+      lengthControl(3, LANE_COLOURS[3]),
+      // Row 3
+      rotateControl(2, LANE_COLOURS[2]),
+      rateControl(2, LANE_COLOURS[2]),
+      rotateControl(3, LANE_COLOURS[3]),
+      rateControl(3, LANE_COLOURS[3])
+    ]
+  };
+}
+function stepEncoder(page, encoder, delta, settings) {
+  const control = page.encoders[encoder];
+  if (!control) return null;
+  const changes = control.step(settings, delta);
+  if (!changes) return null;
+  const after = { ...settings, ...changes };
+  const sysex = encoderSysEx(encoder, control.ring(after), control.label(after), control.colour);
+  return { changes, sysex, lane: control.lane };
+}
+function pageRefresh(page, laneSettings) {
+  const messages = [pageTitleSysEx(page.title)];
+  for (let i = 0; i < page.encoders.length; i++) {
+    const control = page.encoders[i];
+    if (!control) {
+      messages.push(encoderSysEx(i, 0, "    ", { r: 20, g: 20, b: 20 }));
+      continue;
+    }
+    const s = laneSettings(control.lane);
+    messages.push(encoderSysEx(i, control.ring(s), control.label(s), control.colour));
+  }
+  return messages;
+}
+function createE16Display(page) {
+  const showing = /* @__PURE__ */ new Map();
+  const keep = (message) => {
+    const key = message.join(" ");
+    if (showing.get(message[5]) === key) return false;
+    showing.set(message[5], key);
+    return true;
+  };
+  return {
+    update: (laneSettings) => pageRefresh(page, laneSettings).filter(keep),
+    sent(message) {
+      keep(message);
+    },
+    forget() {
+      showing.clear();
     }
   };
 }
